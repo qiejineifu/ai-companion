@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Production: enable cleartext traffic only for trusted domains -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.openai.com</domain>
+        <domain includeSubdomains="true">api.deepseek.com</domain>
+        <domain includeSubdomains="true">dashscope.aliyuncs.com</domain>
+        <domain includeSubdomains="true">api.siliconflow.cn</domain>
+        <domain includeSubdomains="true">api.anthropic.com</domain>
+        <!-- Certificate pinning applied at OkHttp level -->
+    </domain-config>
+
+    <!-- Debug: allow cleartext for local development -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
