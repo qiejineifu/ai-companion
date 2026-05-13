@@ -18,17 +18,9 @@ fun VoiceSettingsScreen(
     var pitch by remember { mutableFloatStateOf(1.0f) }
     var speed by remember { mutableFloatStateOf(1.0f) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("语音设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                }
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(title = { Text("语音设置") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } })
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text("TTS 引擎", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
 

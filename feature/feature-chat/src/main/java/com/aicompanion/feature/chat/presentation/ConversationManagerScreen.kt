@@ -36,22 +36,13 @@ fun ConversationManagerScreen(
     val filtered = if (searchQuery.isBlank()) conversations
         else conversations.filter { it.title.contains(searchQuery, ignoreCase = true) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("对话列表") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                },
-                actions = {
-                    IconButton(onClick = onNew) {
-                        Icon(Icons.Default.Add, "新建对话")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("对话列表") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
+            actions = { IconButton(onClick = onNew) { Icon(Icons.Default.Add, "新建对话") } }
+        )
+        Column {
             // Search
             OutlinedTextField(
                 value = searchQuery,

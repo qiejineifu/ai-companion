@@ -153,6 +153,16 @@ class ChatViewModel @Inject constructor(
             val recentMessages = getMessagesUseCase(conv!!.id).first()
             Log.d("AIC", "Got messages=${recentMessages.size}, memories=${memories.size}")
 
+            // Inject firstMessage as opening if this is a fresh conversation
+            val isNewConversation = recentMessages.isEmpty()
+            if (isNewConversation && persona.firstMessage.isNotBlank()) {
+                val openingMsg = MessageUi(
+                    id = newId(), role = "assistant", content = persona.firstMessage,
+                    createdAt = now() - 1
+                )
+                _state.update { it.copy(messages = it.messages + openingMsg) }
+            }
+
             val context = ChatContext(persona = persona, messages = recentMessages, memories = memories, provider = provider)
             val userMsg = MessageUi(id = newId(), role = "user", content = text, createdAt = now())
             _state.update { it.copy(messages = it.messages + userMsg) }

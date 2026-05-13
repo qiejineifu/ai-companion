@@ -10,27 +10,36 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+// Anime pink palette
+private val Pink500 = Color(0xFFFF6B8A)
+private val Pink50 = Color(0xFFFFF0F5)
+private val Pink100 = Color(0xFFFFE0EC)
+private val Purple500 = Color(0xFF9C6B9E)
+private val SurfaceLight = Color(0xFFFFF5F7)
+private val SurfaceDark = Color(0xFF2D1B2E)
+private val TextDark = Color(0xFF2D1B2E)
+
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF6750A4),
+    primary = Pink500,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEADDFF),
-    secondary = Color(0xFF625B71),
-    tertiary = Color(0xFF7D5260),
-    surface = Color(0xFFFFFBFE),
-    surfaceVariant = Color(0xFFF3EDF7),
-    background = Color(0xFFFFFBFE),
+    primaryContainer = Pink100,
+    secondary = Purple500,
+    tertiary = Color(0xFFC4A5E8),
+    surface = SurfaceLight,
+    surfaceVariant = Color(0xFFF3E8FF),
+    background = SurfaceLight,
     error = Color(0xFFBA1A1A)
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFFD0BCFF),
-    onPrimary = Color(0xFF381E72),
-    primaryContainer = Color(0xFF4F378B),
-    secondary = Color(0xFFCCC2DC),
-    tertiary = Color(0xFFEFB8C8),
-    surface = Color(0xFF1C1B1F),
-    surfaceVariant = Color(0xFF49454F),
-    background = Color(0xFF1C1B1F),
+    primary = Color(0xFFFF85A2),
+    onPrimary = SurfaceDark,
+    primaryContainer = Color(0xFF7A2E45),
+    secondary = Color(0xFFD4BCE0),
+    tertiary = Color(0xFFE8D5F5),
+    surface = SurfaceDark,
+    surfaceVariant = Color(0xFF3D2838),
+    background = SurfaceDark,
     error = Color(0xFFFFB4AB)
 )
 
@@ -44,7 +53,7 @@ fun AICompanionTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.surface.toArgb()
+            window.statusBarColor = colorScheme.primary.toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }

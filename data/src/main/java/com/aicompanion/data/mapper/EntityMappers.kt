@@ -23,11 +23,20 @@ fun PersonaEntity.toDomain(): Persona {
     val traits: List<Trait> = try {
         gson.fromJson(traitsJson, object : TypeToken<List<Trait>>() {}.type)
     } catch (_: Exception) { emptyList() }
+    val exampleChats: List<String> = try {
+        gson.fromJson(exampleChatsJson, object : TypeToken<List<String>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    val tags: List<String> = try {
+        gson.fromJson(tagsJson, object : TypeToken<List<String>>() {}.type)
+    } catch (_: Exception) { emptyList() }
     return Persona(
         id = id, name = name, description = description,
         systemPrompt = systemPrompt, traits = traits,
         speakingStyle = speakingStyle, relationshipType = relationshipType,
         userDisplayName = userDisplayName,
+        scenario = scenario, firstMessage = firstMessage,
+        exampleChats = exampleChats, tags = tags,
+        specVersion = specVersion, creator = creator,
         avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
         isPreset = isPreset, createdAt = createdAt
     )
@@ -70,6 +79,9 @@ fun Persona.toEntity() = PersonaEntity(
     systemPrompt = systemPrompt, traitsJson = gson.toJson(traits),
     speakingStyle = speakingStyle, relationshipType = relationshipType,
     userDisplayName = userDisplayName,
+    scenario = scenario, firstMessage = firstMessage,
+    exampleChatsJson = gson.toJson(exampleChats), tagsJson = gson.toJson(tags),
+    specVersion = specVersion, creator = creator,
     avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
     isPreset = isPreset, createdAt = createdAt
 )

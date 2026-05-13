@@ -182,22 +182,12 @@ private fun ComplianceDocScreen(
     lastUpdated: String,
     content: String
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(title) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-        ) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text(title) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
+        )
+        Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
             Text(
                 "最后更新: $lastUpdated",
                 style = MaterialTheme.typography.labelSmall,

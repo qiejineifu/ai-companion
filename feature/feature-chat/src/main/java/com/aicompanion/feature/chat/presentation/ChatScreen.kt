@@ -2,27 +2,55 @@ package com.aicompanion.feature.chat.presentation
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.aicompanion.core.common.Emotion
+import androidx.compose.ui.unit.sp
+import com.aicompanion.domain.model.Persona
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Palette
+private val Pink50 = Color(0xFFFFF0F5)
+private val Pink100 = Color(0xFFFFE0EC)
+private val Pink200 = Color(0xFFFFC0D8)
+private val Pink400 = Color(0xFFFF85A2)
+private val Pink500 = Color(0xFFFF6B8A)
+private val Pink600 = Color(0xFFF04F7A)
+private val Pink700 = Color(0xFFE0386A)
+private val Purple100 = Color(0xFFF3E8FF)
+private val Purple400 = Color(0xFFC4A5E8)
+private val ChatBg = Color(0xFFFFF5F7)
+private val TextDarkC = Color(0xFF2D1B2E)
+private val TextGrayC = Color(0xFF9B8EA0)
+private val DividerColorC = Color(0xFFF0E0E8)
+
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
@@ -30,141 +58,119 @@ fun ChatScreen(
     onNavigateToApiConfig: () -> Unit,
     onNavigateToMemory: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
-    onNavigateToConversations: (() -> Unit)? = null
+    onNavigateToConversations: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
 
-    // Auto-scroll on new messages
     LaunchedEffect(state.messages.size, state.streamState) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.size - 1)
+            listState.animateScrollToItem(state.messages.size)
+        }
+        if (state.streamState is StreamState.Streaming) {
+            listState.animateScrollToItem(state.messages.size + 1)
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            state.activePersona?.name ?: "AI 陪伴",
-                            maxLines = 1, overflow = TextOverflow.Ellipsis
-                        )
-                        if (state.activeApiProvider != null) {
-                            Text(
-                                "${state.activeApiProvider?.name} / ${state.activeApiProvider?.modelName}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { viewModel.processIntent(ChatIntent.ToggleSidebar) }) {
-                        Icon(Icons.Default.Menu, "会话列表")
-                    }
-                },
-                actions = {
-                    // New conversation
-                    IconButton(onClick = {
-                        viewModel.processIntent(ChatIntent.NewConversation)
-                    }) {
-                        Icon(Icons.Default.Add, "新建对话")
-                    }
-                    // Current emotion indicator
-                    if (state.currentEmotion != Emotion.NEUTRAL) {
-                        Text(
-                            state.currentEmotion.emoji,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                    }
-                    IconButton(onClick = {
-                        viewModel.processIntent(ChatIntent.ToggleVoiceMode)
-                    }) {
-                        Icon(
-                            if (state.voiceMode) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                            "语音模式"
-                        )
-                    }
-                    if (onNavigateToMemory != null) {
-                        IconButton(onClick = onNavigateToMemory) {
-                            Icon(Icons.Default.Psychology, "记忆")
-                        }
-                    }
-                    if (onNavigateToConversations != null) {
-                        IconButton(onClick = onNavigateToConversations) {
-                            Icon(Icons.Default.ChatBubbleOutline, "对话")
-                        }
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, "设置")
-                    }
+    Column(modifier = Modifier.fillMaxSize().background(ChatBg)) {
+        // === Top bar (plain Row, no Scaffold) ===
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Brush.horizontalGradient(listOf(Pink500, Pink600, Pink700)))
+                .statusBarsPadding()
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onBack != null) {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回", tint = Color.White) }
+            } else {
+                IconButton(onClick = { viewModel.processIntent(ChatIntent.ToggleSidebar) }) {
+                    Icon(Icons.Default.Menu, "列表", tint = Color.White)
                 }
-            )
-        },
-        bottomBar = {
-            ChatInputBar(
-                text = state.inputText,
-                onTextChange = { viewModel.processIntent(ChatIntent.UpdateInput(it)) },
-                onSend = { viewModel.processIntent(ChatIntent.SendMessage(it)) },
-                onVoice = { viewModel.processIntent(ChatIntent.SendVoice) },
-                isRecording = state.isRecording,
-                isStreaming = state.streamState is StreamState.Streaming,
-                onStop = { viewModel.processIntent(ChatIntent.StopGeneration) }
-            )
+            }
+
+            Box(
+                modifier = Modifier.size(38.dp).clip(CircleShape)
+                    .border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape)
+                    .background(Pink200),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(state.activePersona?.name?.take(1) ?: "♥", color = Pink600,
+                    fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(state.activePersona?.name ?: "AI 陪伴", color = Color.White,
+                    fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (state.activeApiProvider != null) {
+                    Text("${state.activeApiProvider?.name} · ${state.activeApiProvider?.modelName}",
+                        color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                }
+            }
+
+            IconButton(onClick = { viewModel.processIntent(ChatIntent.NewConversation) }) {
+                Icon(Icons.Default.Add, "新建", tint = Color.White)
+            }
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
+            }
         }
-    ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+
+        // === Content ===
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when {
-                state.conversations.isEmpty() && state.messages.isEmpty() -> {
-                    // Welcome screen
-                    WelcomeContent(
-                        personaName = state.activePersona?.name,
+                state.messages.isEmpty() && state.streamState !is StreamState.Streaming -> {
+                    WelcomeWithCharacter(
+                        persona = state.activePersona,
                         onSelectPersona = onNavigateToPersonas,
                         onConfigureApi = onNavigateToApiConfig
                     )
-                }
-                state.messages.isEmpty() -> {
-                    // No messages yet
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("开始和 ${state.activePersona?.name ?: "AI"} 聊天吧",
-                                style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.height(16.dp))
-                            OutlinedButton(onClick = onNavigateToPersonas) {
-                                Text("切换人设")
-                            }
-                        }
-                    }
                 }
                 else -> {
                     MessageList(
                         messages = state.messages,
                         streamState = state.streamState,
-                        listState = listState
+                        listState = listState,
+                        personaName = state.activePersona?.name ?: "AI"
                     )
                 }
             }
-
-            // Error snackbar
             if (state.error != null) {
                 Snackbar(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    containerColor = Pink600, contentColor = Color.White,
                     action = {
                         TextButton(onClick = { viewModel.processIntent(ChatIntent.DismissError) }) {
-                            Text("关闭")
+                            Text("关闭", color = Color.White)
                         }
                     }
-                ) {
-                    Text(state.error!!)
-                }
+                ) { Text(state.error!!) }
             }
         }
+
+        // === Character card (compact, when empty) ===
+        val persona = state.activePersona
+        if (persona != null && state.messages.isEmpty()) {
+            CharacterProfileCard(persona = persona)
+        }
+
+        // === Input bar ===
+        ChatInputBar(
+            text = state.inputText,
+            onTextChange = { viewModel.processIntent(ChatIntent.UpdateInput(it)) },
+            onSend = { viewModel.processIntent(ChatIntent.SendMessage(it)) },
+            onVoice = { viewModel.processIntent(ChatIntent.SendVoice) },
+            isRecording = state.isRecording,
+            isStreaming = state.streamState is StreamState.Streaming,
+            onStop = { viewModel.processIntent(ChatIntent.StopGeneration) },
+            onMore = onNavigateToPersonas
+        )
     }
 
-    // Sidebar drawer
+    // Sidebar overlay
     if (state.showSidebar) {
         ConversationSidebar(
             conversations = state.conversations,
@@ -176,78 +182,87 @@ fun ChatScreen(
     }
 }
 
+// --- Character profile card ---
 @Composable
-private fun WelcomeContent(
-    personaName: String?,
-    onSelectPersona: () -> Unit,
-    onConfigureApi: () -> Unit
-) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-            Text("欢迎使用 AI 陪伴", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "选择一个 AI 角色，配置 API，开始对话",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.outline
-            )
-            Spacer(Modifier.height(32.dp))
-            Button(onClick = onSelectPersona) {
-                Icon(Icons.Default.Person, null)
-                Spacer(Modifier.width(8.dp))
-                Text("选择人设")
+private fun CharacterProfileCard(persona: Persona) {
+    Surface(color = Pink50, modifier = Modifier.fillMaxWidth(), shadowElevation = 1.dp) {
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(Pink200), contentAlignment = Alignment.Center) {
+                Text(persona.name.take(1), fontSize = 24.sp, color = Pink600, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = onConfigureApi) {
-                Icon(Icons.Default.Api, null)
-                Spacer(Modifier.width(8.dp))
-                Text("配置 API")
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(persona.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDarkC)
+                if (persona.description.isNotBlank()) {
+                    Text(persona.description, fontSize = 13.sp, color = TextGrayC, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (persona.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        persona.tags.take(3).forEach { tag ->
+                            Text("#$tag", fontSize = 11.sp, color = Pink500,
+                                modifier = Modifier.background(Pink100, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+// --- Welcome ---
 @Composable
-private fun MessageList(
-    messages: List<MessageUi>,
-    streamState: StreamState,
-    listState: androidx.compose.foundation.lazy.LazyListState
-) {
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(messages, key = { it.id }) { message ->
-            MessageBubble(message = message)
-        }
-
-        // Streaming message
-        if (streamState is StreamState.Streaming) {
-            item {
-                MessageBubble(
-                    message = MessageUi(
-                        id = "streaming", role = "assistant",
-                        content = streamState.partialText,
-                        emotion = streamState.emotion?.label,
-                        isStreaming = true, createdAt = System.currentTimeMillis()
-                    )
-                )
+private fun WelcomeWithCharacter(persona: Persona?, onSelectPersona: () -> Unit, onConfigureApi: () -> Unit) {
+    if (persona == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("♥", fontSize = 48.sp, color = Pink400)
+                Spacer(Modifier.height(16.dp))
+                Text("选择一个角色开始对话吧", color = TextGrayC)
+                Spacer(Modifier.height(24.dp))
+                Button(onClick = onSelectPersona, colors = ButtonDefaults.buttonColors(containerColor = Pink500)) { Text("选择人设") }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = onConfigureApi) { Text("配置 API") }
             }
         }
-
-        // Error state
-        if (streamState is StreamState.Error) {
+    } else {
+        LazyColumn(contentPadding = PaddingValues(16.dp)) {
             item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-                ) {
-                    Text(
-                        streamState.message,
-                        modifier = Modifier.padding(12.dp),
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
+                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(Modifier.height(20.dp))
+                    Box(modifier = Modifier.size(100.dp).clip(RoundedCornerShape(24.dp))
+                        .background(Brush.linearGradient(listOf(Pink400, Pink600))), contentAlignment = Alignment.Center) {
+                        Text(persona.name.take(2), fontSize = 36.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text(persona.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDarkC)
+                    if (persona.description.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(persona.description, fontSize = 14.sp, color = TextGrayC)
+                    }
+                    if (persona.scenario.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("「${persona.scenario}」", fontSize = 13.sp, color = Pink500,
+                            modifier = Modifier.background(Pink100, RoundedCornerShape(8.dp)).padding(horizontal = 14.dp, vertical = 6.dp))
+                    }
+                    if (persona.tags.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            persona.tags.forEach { tag ->
+                                Text("#$tag", color = Pink500, fontSize = 13.sp,
+                                    modifier = Modifier.background(Pink50, RoundedCornerShape(6.dp))
+                                        .border(1.dp, Pink200, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
+                    if (persona.firstMessage.isNotBlank()) {
+                        Spacer(Modifier.height(16.dp))
+                        DividerLine()
+                        Spacer(Modifier.height(12.dp))
+                        Text(persona.firstMessage, fontSize = 14.sp, color = TextGrayC,
+                            modifier = Modifier.background(Color.White, RoundedCornerShape(12.dp)).padding(16.dp))
+                    }
+                    Spacer(Modifier.height(24.dp))
                 }
             }
         }
@@ -255,47 +270,148 @@ private fun MessageList(
 }
 
 @Composable
-fun MessageBubble(message: MessageUi) {
-    val isUser = message.role == "user"
-    val alignment = if (isUser) Alignment.End else Alignment.Start
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                      else MaterialTheme.colorScheme.surfaceVariant
-    val shape = RoundedCornerShape(
-        topStart = 16.dp, topEnd = 16.dp,
-        bottomStart = if (isUser) 16.dp else 4.dp,
-        bottomEnd = if (isUser) 4.dp else 16.dp
-    )
+private fun DividerLine() {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(1.dp).background(DividerColorC))
+        Text(" ✦ ", color = Pink400, fontSize = 12.sp)
+        Box(Modifier.weight(1f).height(1.dp).background(DividerColorC))
+    }
+}
 
-    Column(
-        horizontalAlignment = alignment,
-        modifier = Modifier.fillMaxWidth()
+// --- Message list ---
+@Composable
+private fun MessageList(
+    messages: List<MessageUi>,
+    streamState: StreamState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    personaName: String
+) {
+    val timeFormat = remember { SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault()) }
+    var lastTimeShown by remember { mutableStateOf(0L) }
+    var lastDate by remember { mutableStateOf("") }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        if (!isUser) {
-            Text(
-                text = if (message.emotion != null) {
-                    val emoji = Emotion.entries.find { it.label == message.emotion }?.emoji ?: ""
-                    "AI $emoji"
-                } else "AI",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-            )
-        }
-        Surface(
-            shape = shape,
-            color = bubbleColor,
-            modifier = Modifier.widthIn(max = 320.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = message.content + if (message.isStreaming) "▊" else "",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+        messages.forEachIndexed { index, message ->
+            val msgTime = message.createdAt
+            val dateStr = SimpleDateFormat("MM月dd日", Locale.getDefault()).format(Date(msgTime))
+
+            if (index == 0 || dateStr != lastDate) {
+                item(key = "date_$dateStr") {
+                    Text(dateStr, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = TextGrayC, fontSize = 13.sp)
+                }
+                lastDate = dateStr
+                lastTimeShown = 0L
             }
+            if (index > 0 && msgTime - lastTimeShown > 30 * 60 * 1000) {
+                item(key = "time_${msgTime}") {
+                    Text(timeFormat.format(Date(msgTime)), modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = TextGrayC, fontSize = 12.sp)
+                }
+            }
+            lastTimeShown = msgTime
+
+            item(key = message.id) {
+                val isUser = message.role == "user"
+                Row(modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    if (!isUser) {
+                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Pink200), contentAlignment = Alignment.Center) {
+                            Text(personaName.take(1), fontSize = 14.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Column(modifier = Modifier.widthIn(max = 260.dp)) {
+                        Surface(
+                            shape = if (isUser) RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
+                                else RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
+                            color = if (isUser) Pink400 else Color.White,
+                            shadowElevation = if (isUser) 2.dp else 0.5.dp
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                if (isUser) Text(message.content, color = Color.White, fontSize = 15.sp, lineHeight = 22.sp)
+                                else MarkdownMsg(text = message.content + if (message.isStreaming) "▊" else "")
+                            }
+                        }
+                    }
+                    if (isUser) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Purple100), contentAlignment = Alignment.Center) {
+                            Text("我", fontSize = 11.sp, color = Purple400, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (streamState is StreamState.Streaming) {
+            item(key = "streaming") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Bottom) {
+                    Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Pink200), contentAlignment = Alignment.Center) {
+                        Text(personaName.take(1), fontSize = 14.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.widthIn(max = 260.dp)) {
+                        Surface(shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp), color = Color.White, shadowElevation = 0.5.dp) {
+                            Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                Text("${streamState.partialText}▊", fontSize = 15.sp, color = TextDarkC, lineHeight = 22.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "bottom_spacer") { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+// --- Markdown ---
+@Composable
+private fun MarkdownMsg(text: String) {
+    val annotated = remember(text) { parseMarkdown(text) }
+    Text(text = annotated, fontSize = 15.sp, lineHeight = 22.sp)
+}
+
+private fun parseMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    val chars = text.toCharArray()
+    while (i < chars.size) {
+        when {
+            chars.size > i + 3 && String(chars, i, 3) == "```" -> {
+                val end = text.indexOf("```", i + 3)
+                val code = if (end > i) text.substring(i + 3, end).trimStart('\n') else text.substring(i + 3)
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, background = Pink50, color = Pink700)) { append(code) }
+                i = if (end > i) end + 3 else chars.size
+            }
+            chars.size > i + 2 && String(chars, i, 2) == "**" -> {
+                val end = text.indexOf("**", i + 2)
+                if (end > i) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextDarkC)) { append(text.substring(i + 2, end)) }
+                    i = end + 2
+                } else { append(chars[i]); i++ }
+            }
+            chars[i] == '`' -> {
+                val end = text.indexOf('`', i + 1)
+                if (end > i) {
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, background = Pink100)) { append(text.substring(i + 1, end)) }
+                    i = end + 1
+                } else { append(chars[i]); i++ }
+            }
+            else -> { withStyle(SpanStyle(color = TextDarkC)) { append(chars[i]) }; i++ }
         }
     }
 }
 
+// --- Input bar ---
 @Composable
 fun ChatInputBar(
     text: String,
@@ -304,51 +420,52 @@ fun ChatInputBar(
     onVoice: () -> Unit,
     isRecording: Boolean,
     isStreaming: Boolean,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onMore: () -> Unit
 ) {
-    Surface(
-        tonalElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Surface(color = Color.White, shadowElevation = 4.dp, modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onVoice) {
-                Icon(
-                    if (isRecording) Icons.Default.Mic else Icons.Default.Mic,
-                    contentDescription = "语音",
-                    tint = if (isRecording) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                )
+            IconButton(onClick = onMore, modifier = Modifier.size(42.dp).clip(CircleShape).background(Pink100)) {
+                Icon(Icons.Default.Add, "更多", tint = Pink500, modifier = Modifier.size(22.dp))
             }
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                placeholder = { Text("输入消息...") },
-                modifier = Modifier.weight(1f),
-                maxLines = 4,
-                shape = RoundedCornerShape(24.dp)
-            )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Pink50)
+                    .then(if (text.isNotEmpty()) Modifier.border(1.5.dp, Pink200, RoundedCornerShape(22.dp)) else Modifier)
+                    .padding(horizontal = 18.dp, vertical = 11.dp)
+            ) {
+                if (text.isEmpty()) Text("说点什么吧...", color = TextGrayC.copy(alpha = 0.6f), fontSize = 15.sp)
+                BasicTextField(value = text, onValueChange = onTextChange,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextDarkC, fontSize = 15.sp),
+                    cursorBrush = SolidColor(Pink500), modifier = Modifier.fillMaxWidth(), maxLines = 4, singleLine = false)
+            }
             Spacer(Modifier.width(8.dp))
             if (isStreaming) {
-                FilledIconButton(
-                    onClick = onStop,
-                    modifier = Modifier.clip(CircleShape)
-                ) {
-                    Icon(Icons.Default.Stop, "停止生成")
+                IconButton(onClick = onStop, modifier = Modifier.size(42.dp).clip(CircleShape).background(Pink600)) {
+                    Icon(Icons.Default.Stop, "停止", tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             } else {
-                FilledIconButton(
-                    onClick = { if (text.isNotBlank()) { onSend(text); onTextChange("") } },
-                    modifier = Modifier.clip(CircleShape)
+                IconButton(onClick = onVoice, modifier = Modifier.size(42.dp)) {
+                    Icon(Icons.Default.Mic, "语音", tint = if (isRecording) Pink600 else TextGrayC, modifier = Modifier.size(22.dp))
+                }
+                IconButton(
+                    onClick = { if (text.isNotBlank()) { onSend(text.trim()); onTextChange("") } },
+                    enabled = text.isNotBlank(),
+                    modifier = Modifier.size(42.dp).clip(CircleShape)
+                        .then(if (text.isNotBlank()) Modifier.background(Pink500) else Modifier)
                 ) {
-                    Icon(Icons.Default.Send, "发送")
+                    Icon(Icons.AutoMirrored.Filled.Send, "发送",
+                        tint = if (text.isNotBlank()) Color.White else Pink200, modifier = Modifier.size(20.dp))
                 }
             }
         }
     }
 }
 
+// --- Sidebar ---
 @Composable
 fun ConversationSidebar(
     conversations: List<com.aicompanion.domain.model.Conversation>,
@@ -358,42 +475,31 @@ fun ConversationSidebar(
     onDismiss: () -> Unit
 ) {
     Box(Modifier.fillMaxSize()) {
-        // Backdrop click
-        Surface(
-            modifier = Modifier.fillMaxSize().clickable { onDismiss() },
-            color = Color.Black.copy(alpha = 0.5f)
-        ) {}
-
-        // Sidebar
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.75f).fillMaxHeight(),
-            tonalElevation = 8.dp
-        ) {
+        Surface(modifier = Modifier.fillMaxSize().clickable { onDismiss() }, color = Color.Black.copy(alpha = 0.4f)) {}
+        Surface(modifier = Modifier.fillMaxWidth(0.78f).fillMaxHeight(), color = Color.White) {
             Column {
-                ListItem(
-                    headlineContent = { Text("会话列表", fontWeight = FontWeight.Bold) },
-                    trailingContent = {
-                        IconButton(onClick = {
-                            onNew()
-                            onDismiss()
-                        }) {
-                            Icon(Icons.Default.Add, "新对话")
-                        }
+                Surface(color = Pink500) {
+                    Row(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("对话列表", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.White, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { onNew(); onDismiss() }) { Icon(Icons.Default.Add, "新对话", tint = Color.White) }
                     }
-                )
-                Divider()
-                LazyColumn {
-                    items(conversations, key = { it.id }) { conv ->
-                        ListItem(
-                            headlineContent = { Text(conv.title, maxLines = 1) },
-                            modifier = Modifier.clickable {
-                                onSelect(conv.id)
-                                onDismiss()
-                            },
-                            colors = if (conv.id == activeId) ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            ) else ListItemDefaults.colors()
-                        )
+                }
+                if (conversations.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无对话", color = TextGrayC) }
+                } else {
+                    LazyColumn {
+                        itemsIndexed(conversations, key = { _, c -> c.id }) { _, conv ->
+                            ListItem(
+                                headlineContent = { Text(conv.title, maxLines = 1, fontSize = 15.sp, color = TextDarkC) },
+                                supportingContent = {
+                                    val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()) }
+                                    Text(fmt.format(Date(conv.lastMessageAt)), fontSize = 12.sp, color = TextGrayC)
+                                },
+                                modifier = Modifier.clickable { onSelect(conv.id); onDismiss() },
+                                colors = if (conv.id == activeId) ListItemDefaults.colors(containerColor = Pink50) else ListItemDefaults.colors()
+                            )
+                        }
                     }
                 }
             }

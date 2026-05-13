@@ -24,19 +24,13 @@ fun OEMGuideScreen(onBack: () -> Unit) {
     val guide = remember { OEMGuideHelper.getGuide() }
     val isIgnored = remember { OEMGuideHelper.isBatteryOptimizationIgnored(context) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("后台运行设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                }
-            )
-        }
-    ) { padding ->
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("后台运行设置") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
+        )
         Column(
             modifier = Modifier
-                .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {

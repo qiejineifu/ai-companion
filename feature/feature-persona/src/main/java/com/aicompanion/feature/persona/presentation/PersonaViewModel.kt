@@ -20,7 +20,9 @@ data class PersonaUiState(
     val editingPersona: Persona? = null,
     val showEditDialog: Boolean = false,
     val newTraitKey: String = "",
-    val newTraitValue: String = ""
+    val newTraitValue: String = "",
+    val newExampleChat: String = "",
+    val newTag: String = ""
 )
 
 @HiltViewModel
@@ -88,6 +90,50 @@ class PersonaViewModel @Inject constructor(
 
     fun setTraitKey(value: String) { _state.update { it.copy(newTraitKey = value) } }
     fun setTraitValue(value: String) { _state.update { it.copy(newTraitValue = value) } }
+
+    // Example chats
+    fun addExampleChat() {
+        val chat = _state.value.newExampleChat.trim()
+        if (chat.isBlank()) return
+        val persona = _state.value.editingPersona ?: return
+        _state.update {
+            it.copy(
+                editingPersona = persona.copy(exampleChats = persona.exampleChats + chat),
+                newExampleChat = ""
+            )
+        }
+    }
+    fun removeExampleChat(index: Int) {
+        val persona = _state.value.editingPersona ?: return
+        _state.update {
+            it.copy(editingPersona = persona.copy(
+                exampleChats = persona.exampleChats.toMutableList().also { l -> l.removeAt(index) }
+            ))
+        }
+    }
+    fun setNewExampleChat(value: String) { _state.update { it.copy(newExampleChat = value) } }
+
+    // Tags
+    fun addTag() {
+        val tag = _state.value.newTag.trim()
+        if (tag.isBlank()) return
+        val persona = _state.value.editingPersona ?: return
+        _state.update {
+            it.copy(
+                editingPersona = persona.copy(tags = persona.tags + tag),
+                newTag = ""
+            )
+        }
+    }
+    fun removeTag(index: Int) {
+        val persona = _state.value.editingPersona ?: return
+        _state.update {
+            it.copy(editingPersona = persona.copy(
+                tags = persona.tags.toMutableList().also { l -> l.removeAt(index) }
+            ))
+        }
+    }
+    fun setNewTag(value: String) { _state.update { it.copy(newTag = value) } }
 
     fun savePersona() {
         val persona = _state.value.editingPersona ?: return

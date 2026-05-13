@@ -25,17 +25,12 @@ fun Live2DModelManagerScreen(
     val models by manager.getModels().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("模型管理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                }
-            )
-        }
-    ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("模型管理") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } }
+        )
+        LazyColumn {
             item {
                 Text("当前模型", style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

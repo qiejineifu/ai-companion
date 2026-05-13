@@ -1,5 +1,6 @@
 package com.aicompanion.feature.apiconfig.presentation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,8 +11,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+
+private val Pink50 = Color(0xFFFFF0F5)
+private val Pink400 = Color(0xFFFF85A2)
+private val Pink500 = Color(0xFFFF6B8A)
+private val Pink600 = Color(0xFFF04F7A)
+private val Pink700 = Color(0xFFE0386A)
+private val ChatBg = Color(0xFFFFF5F7)
+private val TextDark = Color(0xFF2D1B2E)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -21,38 +32,27 @@ fun ApiConfigScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("API 配置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.showAddDialog() }) {
-                        Icon(Icons.Default.Add, "添加")
-                    }
-                }
-            )
-        }
-    ) { padding ->
+    Column(modifier = Modifier.fillMaxSize().background(ChatBg)) {
+        TopAppBar(
+            title = { Text("API 配置", color = Color.White) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回", tint = Color.White) } },
+            actions = { IconButton(onClick = { viewModel.showAddDialog() }) { Icon(Icons.Default.Add, "添加", tint = Color.White) } },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            modifier = Modifier.background(Brush.horizontalGradient(listOf(Pink500, Pink600, Pink700)))
+        )
         if (state.providers.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("尚未配置 API", style = MaterialTheme.typography.titleMedium)
+                    Text("尚未配置 API", style = MaterialTheme.typography.titleMedium, color = TextDark)
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = { viewModel.showTemplatePicker() }) {
+                    Button(onClick = { viewModel.showTemplatePicker() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Pink500)) {
                         Text("添加 API 提供商")
                     }
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.padding(padding)) {
+            LazyColumn {
                 items(state.providers, key = { it.id }) { provider ->
                     ProviderCard(
                         provider = provider,
@@ -102,9 +102,8 @@ private fun ProviderCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-        colors = if (isActive) CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ) else CardDefaults.cardColors()
+        colors = if (isActive) CardDefaults.cardColors(containerColor = Pink50)
+        else CardDefaults.cardColors(containerColor = Color.White)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

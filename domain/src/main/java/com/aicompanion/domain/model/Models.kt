@@ -31,6 +31,13 @@ data class Persona(
     val speakingStyle: String = "温柔",
     val relationshipType: String = "朋友",
     val userDisplayName: String = "",
+    // Character Card fields (酒馆风格)
+    val scenario: String = "",
+    val firstMessage: String = "",
+    val exampleChats: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val specVersion: String = "",
+    val creator: String = "",
     val avatarImageUri: String? = null,
     val defaultModelPath: String? = null,
     val isPreset: Boolean = false,

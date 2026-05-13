@@ -27,22 +27,13 @@ fun VoiceProfileScreen(
     val profiles by voiceRepository.getProfiles().collectAsState(initial = emptyList())
     val activeProfile = profiles.firstOrNull { it.isActive }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("音色管理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                },
-                actions = {
-                    IconButton(onClick = { /* TODO: create new profile */ }) {
-                        Icon(Icons.Default.Add, "添加音色")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("音色管理") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") } },
+            actions = { IconButton(onClick = { /* TODO */ }) { Icon(Icons.Default.Add, "添加音色") } }
+        )
+        LazyColumn {
             // Active profile
             if (activeProfile != null) {
                 item {

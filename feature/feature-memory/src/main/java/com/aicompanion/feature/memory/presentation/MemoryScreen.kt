@@ -1,6 +1,7 @@
 package com.aicompanion.feature.memory.presentation
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,9 +12,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aicompanion.domain.model.MemoryEntry
+
+private val Pink500 = Color(0xFFFF6B8A)
+private val Pink600 = Color(0xFFF04F7A)
+private val Pink700 = Color(0xFFE0386A)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,25 +30,18 @@ fun MemoryScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("记忆管理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回") }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.showEditDialog() }) {
-                        Icon(Icons.Default.Add, "添加记忆")
-                    }
-                    IconButton(onClick = { viewModel.clearAllMemories() }) {
-                        Icon(Icons.Default.Delete, "清除全部")
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFFFF5F7))) {
+        TopAppBar(
+            title = { Text("记忆管理", color = Color.White) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回", tint = Color.White) } },
+            actions = {
+                IconButton(onClick = { viewModel.showEditDialog() }) { Icon(Icons.Default.Add, "添加记忆", tint = Color.White) }
+                IconButton(onClick = { viewModel.clearAllMemories() }) { Icon(Icons.Default.Delete, "清除全部", tint = Color.White) }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            modifier = Modifier.background(Brush.horizontalGradient(listOf(Pink500, Pink600, Pink700)))
+        )
+        Column {
             // Persona selector
             if (state.personas.size > 1) {
                 ScrollableTabRow(

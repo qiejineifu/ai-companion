@@ -115,10 +115,29 @@ class ChatRepositoryImpl(
 
     private fun buildApiMessages(context: ChatContext, currentMsg: String): List<Map<String, String>> {
         val messages = mutableListOf<Map<String, String>>()
+        val persona = context.persona
         val systemContent = buildString {
-            append(context.persona.systemPrompt)
-            if (context.persona.userDisplayName.isNotBlank()) {
-                append("\n\n用户的名字是「${context.persona.userDisplayName}」，请在对话中用这个名字称呼用户。")
+            // Role definition
+            append(persona.systemPrompt)
+
+            // Scenario / world building
+            if (persona.scenario.isNotBlank()) {
+                append("\n\n【场景】${persona.scenario}")
+            }
+
+            // Speaking style & relationship
+            append("\n\n【说话风格】${persona.speakingStyle}")
+            append("\n【关系定位】${persona.relationshipType}")
+
+            // User identity
+            if (persona.userDisplayName.isNotBlank()) {
+                append("\n\n用户的名字是「${persona.userDisplayName}」，请在对话中用这个名字称呼用户。")
+            }
+
+            // Example chats for tone reference
+            if (persona.exampleChats.isNotEmpty()) {
+                append("\n\n【参考对话风格】")
+                persona.exampleChats.forEach { append("\n$it") }
             }
         }
         messages.add(mapOf("role" to "system", "content" to systemContent))

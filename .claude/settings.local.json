@@ -47,7 +47,12 @@
       "Bash(\"C:/Users/切记内服/Android/Sdk/platform-tools/adb.exe\" install *)",
       "Bash(\"C:/Users/切记内服/Android/Sdk/platform-tools/adb.exe\" shell *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(gh auth *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh repo *)",
+      "Bash(\"C:/Users/切记内服/Android/Sdk/platform-tools/adb.exe\" uninstall *)",
+      "Bash(git push *)"
     ]
   }
 }
