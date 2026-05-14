@@ -13,7 +13,9 @@ import com.aicompanion.core.database.entity.*
         ApiProviderEntity::class,
         MemoryEntryEntity::class,
         VoiceProfileEntity::class,
-        Live2DModelInfoEntity::class
+        Live2DModelInfoEntity::class,
+        StickerEntity::class,
+        WorldBookEntity::class
     ],
     version = 1,
     exportSchema = false
@@ -26,4 +28,6 @@ abstract class AICompanionDatabase : RoomDatabase() {
     abstract fun memoryEntryDao(): MemoryEntryDao
     abstract fun voiceProfileDao(): VoiceProfileDao
     abstract fun live2DModelInfoDao(): Live2DModelInfoDao
+    abstract fun stickerDao(): StickerDao
+    abstract fun worldBookDao(): WorldBookDao
 }

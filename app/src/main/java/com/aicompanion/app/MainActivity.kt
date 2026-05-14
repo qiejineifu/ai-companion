@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -32,6 +33,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var apiProviderRepository: ApiProviderRepository
     @Inject lateinit var memoryRepository: MemoryRepository
     @Inject lateinit var chatRepository: ChatRepository
+    @Inject lateinit var stickerRepository: StickerRepository
+    @Inject lateinit var worldBookRepository: WorldBookRepository
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -41,6 +44,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         requestRequiredPermissions()
 
+        // Handle notification intent
+        val notifPersonaId = intent?.getStringExtra("navigate_to_persona")
+        val notifConvId = intent?.getStringExtra("navigate_to_conv")
+
         setContent {
             AICompanionTheme {
                 Surface(
@@ -48,6 +55,16 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
+
+                    // Navigate to conversation if opened from notification
+                    LaunchedEffect(notifPersonaId, notifConvId) {
+                        if (notifPersonaId != null && notifConvId != null) {
+                            navController.navigate(
+                                com.aicompanion.app.navigation.Routes.chatRoute(notifPersonaId, notifConvId)
+                            )
+                        }
+                    }
+
                     AppNavigation(
                         navController = navController,
                         ttsManager = ttsManager,
@@ -57,6 +74,8 @@ class MainActivity : ComponentActivity() {
                         apiProviderRepository = apiProviderRepository,
                         memoryRepository = memoryRepository,
                         chatRepository = chatRepository,
+                        stickerRepository = stickerRepository,
+                        worldBookRepository = worldBookRepository,
                         context = this
                     )
                 }

@@ -20,23 +20,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.aicompanion.core.ui.theme.*
+import com.aicompanion.domain.model.Conversation
 import com.aicompanion.domain.model.Persona
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private val Pink50 = Color(0xFFFFF0F5)
-private val Pink100 = Color(0xFFFFE0EC)
-private val Pink200 = Color(0xFFFFC0D8)
-private val Pink400 = Color(0xFFFF85A2)
-private val Pink500 = Color(0xFFFF6B8A)
-private val Pink600 = Color(0xFFF04F7A)
-private val Pink700 = Color(0xFFE0386A)
-private val Purple400 = Color(0xFFC4A5E8)
-private val TextDark = Color(0xFF2D1B2E)
-private val TextGray = Color(0xFF9B8EA0)
-private val DividerColor = Color(0xFFF0E0E8)
-private val ChatBg = Color(0xFFFFF5F7)
 
 data class PersonaConversation(
     val persona: Persona,
@@ -52,15 +42,18 @@ fun ConversationListScreen(
     activePersonaId: String?,
     onPersonaClick: (String) -> Unit,
     onNewConversation: () -> Unit,
+    onNewGroupChat: () -> Unit = {},
     onNavigateToPersonas: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    groupConversations: List<com.aicompanion.domain.model.Conversation> = emptyList(),
+    onGroupChatClick: ((String) -> Unit)? = null
 ) {
     Column(modifier = Modifier.fillMaxSize().background(ChatBg)) {
         // Top bar (plain Row, no inner Scaffold)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.horizontalGradient(listOf(Pink500, Pink600, Pink700)))
+                .background(Brush.horizontalGradient(topBarGradient))
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -76,6 +69,9 @@ fun ConversationListScreen(
                 }
             }
             if (personas.isNotEmpty()) {
+                IconButton(onClick = onNewGroupChat) {
+                    Icon(Icons.Default.Group, "新建群聊", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
                 IconButton(onClick = onNewConversation) {
                     Icon(Icons.Default.Add, "新建对话", tint = Color.White, modifier = Modifier.size(28.dp))
                 }
@@ -110,11 +106,29 @@ fun ConversationListScreen(
             }
         } else {
             LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                // Group conversations
+                if (groupConversations.isNotEmpty()) {
+                    item(key = "section_group") {
+                        Text(
+                            "群聊", style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            color = Pink500
+                        )
+                    }
+                    items(groupConversations, key = { "group_${it.id}" }) { conv ->
+                        GroupChatRow(
+                            conv = conv,
+                            personas = personas,
+                            onClick = { onGroupChatClick?.invoke(conv.id) }
+                        )
+                    }
+                }
                 items(personas, key = { it.id }) { persona ->
                     val convInfo = conversations[persona.id]
                     ConversationRow(
                         persona = persona,
-                        lastMessage = convInfo?.lastMessage ?: persona.firstMessage.ifBlank { "点击开始对话" },
+                        lastMessage = conversations[persona.id]?.lastMessage
+                        ?: persona.firstMessage.ifBlank { "点击开始对话" },
                         lastTime = convInfo?.lastMessageTime,
                         isActive = persona.id == activePersonaId,
                         onClick = { onPersonaClick(persona.id) }
@@ -164,10 +178,20 @@ private fun ConversationRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier.size(56.dp).clip(CircleShape).background(avatarColor),
+                modifier = Modifier.size(56.dp).clip(CircleShape).background(
+                    if (persona.avatarImageUri == null) avatarColor else Color.Transparent
+                ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(persona.name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                if (persona.avatarImageUri != null) {
+                    AsyncImage(
+                        model = persona.avatarImageUri, contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Text(persona.name.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                }
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -182,6 +206,71 @@ private fun ConversationRow(
         }
     }
     if (!isActive) {
-        Box(modifier = Modifier.fillMaxWidth().padding(start = 86.dp).height(0.5.dp).background(DividerColor))
+        Box(modifier = Modifier.fillMaxWidth().padding(start = 86.dp).height(0.5.dp).background(DividerPink))
     }
+}
+
+@Composable
+private fun GroupChatRow(
+    conv: Conversation,
+    personas: List<Persona>,
+    onClick: () -> Unit
+) {
+    val timeStr = if (conv.lastMessageAt > 0) {
+        val now = System.currentTimeMillis()
+        val diff = now - conv.lastMessageAt
+        when {
+            diff < 60_000 -> "刚刚"
+            diff < 3600_000 -> "${diff / 60_000}分钟前"
+            diff < 86400_000 -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(conv.lastMessageAt))
+            else -> SimpleDateFormat("MM/dd", Locale.getDefault()).format(Date(conv.lastMessageAt))
+        }
+    } else ""
+
+    val groupPersonaNames = conv.groupPersonaIds.mapNotNull { id ->
+        personas.find { it.id == id }?.name
+    }
+
+    Surface(
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { onClick() }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Group avatar
+            val groupCircleMod = Modifier.size(56.dp).clip(CircleShape)
+                .let { m -> if (conv.avatarImageUri == null) m.background(Brush.horizontalGradient(listOf(Pink400, Pink600))) else m.background(Color.Transparent) }
+            Box(
+                modifier = groupCircleMod,
+                contentAlignment = Alignment.Center
+            ) {
+                if (conv.avatarImageUri != null) {
+                    AsyncImage(model = conv.avatarImageUri, contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                } else {
+                    Text("👥", fontSize = 24.sp)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("群聊", fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = TextDark,
+                        modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (timeStr.isNotEmpty()) Text(timeStr, fontSize = 12.sp, color = TextGray)
+                }
+                Spacer(Modifier.height(4.dp))
+                if (groupPersonaNames.isNotEmpty()) {
+                    Text(groupPersonaNames.joinToString("、"), fontSize = 12.sp, color = Pink400, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (conv.lastMessagePreview.isNotBlank()) {
+                    Text(conv.lastMessagePreview, fontSize = 14.sp, color = TextGray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+    Box(modifier = Modifier.fillMaxWidth().padding(start = 86.dp).height(0.5.dp).background(DividerPink))
 }

@@ -19,8 +19,12 @@ data class PersonaEntity(
     val tagsJson: String = "[]",
     val specVersion: String = "",
     val creator: String = "",
+    val voiceProfileId: String? = null,
+    val apiProviderId: String? = null,
     val avatarImageUri: String? = null,
     val defaultModelPath: String? = null,
+    val authorsNote: String = "",
+    val waifuMode: Boolean = false,
     val isPreset: Boolean = false,
     val createdAt: Long
 )

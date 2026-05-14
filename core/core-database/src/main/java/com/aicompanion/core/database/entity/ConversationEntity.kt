@@ -9,8 +9,12 @@ data class ConversationEntity(
     val personaId: String,
     val apiProviderId: String,
     val title: String,
+    val lastMessagePreview: String = "",
     val createdAt: Long,
     val lastMessageAt: Long,
     val isPinned: Boolean = false,
-    val isArchived: Boolean = false
+    val isArchived: Boolean = false,
+    val isGroupChat: Boolean = false,
+    val groupPersonaIdsJson: String = "[]",
+    val avatarImageUri: String? = null
 )

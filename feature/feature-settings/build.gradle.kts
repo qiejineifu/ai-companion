@@ -32,5 +32,6 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
     implementation(libs.coroutines.android)
+    implementation(libs.coil.compose)
     implementation(libs.gson)
 }

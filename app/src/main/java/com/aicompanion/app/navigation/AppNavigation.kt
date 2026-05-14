@@ -2,6 +2,7 @@ package com.aicompanion.app.navigation
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
@@ -27,6 +28,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
+import com.aicompanion.core.ui.theme.*
 import com.aicompanion.domain.model.Persona
 import com.aicompanion.domain.repository.*
 import com.aicompanion.feature.apiconfig.presentation.ApiConfigScreen
@@ -37,27 +39,16 @@ import com.aicompanion.feature.live2d.Live2DModelManagerScreen
 import com.aicompanion.feature.memory.presentation.MemoryScreen
 import com.aicompanion.feature.memory.presentation.MemoryViewModel
 import com.aicompanion.feature.persona.presentation.PersonaScreen
+import com.aicompanion.feature.persona.presentation.PersonaSettingsScreen
 import com.aicompanion.feature.persona.presentation.PersonaViewModel
 import com.aicompanion.feature.settings.presentation.*
 import com.aicompanion.feature.voice.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-// Anime pink palette (shared across screens)
-val Pink50 = Color(0xFFFFF0F5)
-val Pink100 = Color(0xFFFFE0EC)
-val Pink200 = Color(0xFFFFC0D8)
-val Pink400 = Color(0xFFFF85A2)
-val Pink500 = Color(0xFFFF6B8A)
-val Pink600 = Color(0xFFF04F7A)
-val Pink700 = Color(0xFFE0386A)
-val Purple400 = Color(0xFFC4A5E8)
-val TextDarkA = Color(0xFF2D1B2E)
-val TextGrayA = Color(0xFF9B8EA0)
-
 object Routes {
     const val HOME = "home"
-    const val CHAT = "chat/{personaId}"
+    const val CHAT = "chat/{personaId}?convId={convId}"
     const val API_CONFIG = "api_config"
     const val PERSONAS = "personas"
     const val MEMORY = "memory"
@@ -71,15 +62,35 @@ object Routes {
     const val USER_AGREEMENT = "user_agreement"
     const val LICENSE = "license"
     const val OEM_GUIDE = "oem_guide"
+    const val PERSONA_SETTINGS = "persona_settings/{personaId}"
+    const val STICKER_MANAGE = "sticker_manage/{personaId}"
+    const val WORLD_BOOK = "world_book/{personaId}/{personaName}"
+    const val PROACTIVE_MESSAGES = "proactive_messages"
 
-    fun chatRoute(personaId: String) = "chat/$personaId"
+    fun chatRoute(personaId: String, convId: String? = null) =
+        if (convId != null) "chat/$personaId?convId=$convId" else "chat/$personaId"
+    fun personaSettingsRoute(personaId: String) = "persona_settings/$personaId"
+    fun worldBookRoute(personaId: String, personaName: String) = "world_book/$personaId/$personaName"
 }
 
 // Bottom nav tabs
-private enum class BottomTab(val label: String, val icon: @Composable () -> Unit) {
-    CHATS("对话", { Icon(Icons.Default.ChatBubbleOutline, null, modifier = Modifier.size(24.dp)) }),
-    PERSONAS("人设", { Icon(Icons.Default.Person, null, modifier = Modifier.size(24.dp)) }),
-    SETTINGS("设置", { Icon(Icons.Default.Settings, null, modifier = Modifier.size(24.dp)) })
+private enum class BottomTab(
+    val label: String,
+    val outlineIcon: @Composable () -> Unit,
+    val filledIcon: @Composable () -> Unit
+) {
+    CHATS("对话",
+        { Icon(Icons.Default.ChatBubbleOutline, null, modifier = Modifier.size(24.dp)) },
+        { Icon(Icons.Default.ChatBubble, null, modifier = Modifier.size(24.dp)) }
+    ),
+    PERSONAS("人设",
+        { Icon(Icons.Default.PersonOutline, null, modifier = Modifier.size(24.dp)) },
+        { Icon(Icons.Default.Person, null, modifier = Modifier.size(24.dp)) }
+    ),
+    SETTINGS("设置",
+        { Icon(Icons.Default.Settings, null, modifier = Modifier.size(24.dp)) },
+        { Icon(Icons.Default.Settings, null, modifier = Modifier.size(24.dp)) }
+    )
 }
 
 @Composable
@@ -92,10 +103,15 @@ fun AppNavigation(
     apiProviderRepository: ApiProviderRepository,
     memoryRepository: MemoryRepository,
     chatRepository: ChatRepository,
+    stickerRepository: StickerRepository,
+    worldBookRepository: WorldBookRepository,
     context: Context
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    // User avatar (stored in memory for now; persists across navigation)
+    var userAvatarUri by remember { mutableStateOf<String?>(null) }
 
     // Only show bottom nav on HOME, PERSONAS, SETTINGS (not on CHAT or sub-screens)
     val showBottomNav = currentRoute in listOf(Routes.HOME, Routes.PERSONAS, Routes.SETTINGS)
@@ -113,9 +129,13 @@ fun AppNavigation(
         contentWindowInsets = WindowInsets.navigationBars.union(WindowInsets.ime),
         bottomBar = {
             if (showBottomNav) {
+                Surface(
+                    shadowElevation = 8.dp,
+                    color = Color.White
+                ) {
                 NavigationBar(
                     containerColor = Color.White,
-                    tonalElevation = 0.dp
+                    tonalElevation = 3.dp
                 ) {
                     BottomTab.entries.forEach { tab ->
                         val selected = when (tab) {
@@ -139,17 +159,18 @@ fun AppNavigation(
                                     }
                                 }
                             },
-                            icon = { tab.icon() },
-                            label = { Text(tab.label, fontSize = 12.sp) },
+                            icon = { if (selected) tab.filledIcon() else tab.outlineIcon() },
+                            label = { Text(tab.label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Pink500,
                                 selectedTextColor = Pink500,
-                                indicatorColor = Pink50,
-                                unselectedIconColor = TextGrayA,
-                                unselectedTextColor = TextGrayA
+                                indicatorColor = Pink100,
+                                unselectedIconColor = TextGray,
+                                unselectedTextColor = TextGray
                             )
                         )
                     }
+                }
                 }
             }
         }
@@ -166,21 +187,82 @@ fun AppNavigation(
                 val personaVm: PersonaViewModel = hiltViewModel()
                 val personaState by personaVm.state.collectAsState()
 
-                // Build conversation info per persona
-                val personaConvs = remember(chatState.conversations, personaState.personas) {
-                    personaState.personas.associateWith { p ->
-                        chatState.conversations.find { it.personaId == p.id }
-                    }
+                // Group chat picker dialog
+                if (chatState.showGroupPicker) {
+                    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+                    AlertDialog(
+                        onDismissRequest = { chatVm.processIntent(ChatIntent.DismissError) },
+                        title = { Text("选择群聊角色", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Column {
+                                Text("请选择 2 个或以上的角色加入群聊", color = TextGray, fontSize = 14.sp)
+                                Spacer(Modifier.height(12.dp))
+                                personaState.personas.forEach { persona ->
+                                    val isSelected = persona.id in selectedIds
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clickable {
+                                                selectedIds = if (isSelected) selectedIds - persona.id
+                                                else selectedIds + persona.id
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(checked = isSelected, onCheckedChange = {
+                                            selectedIds = if (it) selectedIds + persona.id
+                                            else selectedIds - persona.id
+                                        })
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(persona.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                        Text(" · ${persona.speakingStyle}", color = TextGray, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    if (selectedIds.size >= 2) {
+                                        // Check for existing group chat with same participants
+                                        val sorted = selectedIds.sorted()
+                                        val existing = chatState.conversations.firstOrNull {
+                                            it.isGroupChat && it.groupPersonaIds.sorted() == sorted && !it.isArchived
+                                        }
+                                        if (existing != null) {
+                                            navController.navigate(Routes.chatRoute(existing.personaId, existing.id))
+                                        } else {
+                                            val groupConvId = com.aicompanion.core.common.newId()
+                                            chatVm.processIntent(ChatIntent.StartGroupChat(selectedIds.toList(), groupConvId))
+                                            navController.navigate(Routes.chatRoute(selectedIds.first(), groupConvId))
+                                        }
+                                    }
+                                },
+                                enabled = selectedIds.size >= 2
+                            ) { Text("开始群聊 (${selectedIds.size})") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { chatVm.processIntent(ChatIntent.DismissError) }) { Text("取消") }
+                        }
+                    )
                 }
 
                 ConversationListScreen(
                     personas = personaState.personas,
-                    conversations = personaConvs.mapKeys { it.key.id }.mapValues { (pId, conv) ->
-                        PersonaConversation(
-                            persona = personaConvs.entries.first { it.key.id == pId }.key,
-                            lastMessage = conv?.title ?: "",
-                            lastMessageTime = conv?.lastMessageAt ?: 0L
-                        )
+                    conversations = buildMap {
+                        chatState.conversations.filter { !it.isGroupChat }.forEach { conv ->
+                            val p = personaState.personas.firstOrNull { it.id == conv.personaId }
+                            if (p != null) put(conv.personaId, PersonaConversation(
+                                persona = p,
+                                lastMessage = conv.lastMessagePreview.ifBlank { conv.title },
+                                lastMessageTime = conv.lastMessageAt
+                            ))
+                        }
+                    },
+                    groupConversations = chatState.conversations.filter { it.isGroupChat },
+                    onGroupChatClick = { convId ->
+                        val conv = chatState.conversations.find { it.id == convId }
+                        chatVm.processIntent(ChatIntent.SelectConversation(convId))
+                        navController.navigate(Routes.chatRoute(conv?.personaId ?: "", convId))
                     },
                     activePersonaId = chatState.activePersona?.id,
                     onPersonaClick = { personaId ->
@@ -195,6 +277,7 @@ fun AppNavigation(
                             navController.navigate(Routes.chatRoute(firstId))
                         }
                     },
+                    onNewGroupChat = { chatVm.processIntent(ChatIntent.ShowGroupPicker) },
                     onNavigateToPersonas = {
                         navController.navigate(Routes.PERSONAS) {
                             popUpTo(Routes.HOME) { saveState = true }
@@ -215,17 +298,35 @@ fun AppNavigation(
             // === CHAT: Conversation detail ===
             composable(
                 route = Routes.CHAT,
-                arguments = listOf(navArgument("personaId") { type = NavType.StringType })
+                arguments = listOf(
+                    navArgument("personaId") { type = NavType.StringType },
+                    navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null }
+                )
             ) { backStackEntry ->
                 val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                val convId = backStackEntry.arguments?.getString("convId")
                 val vm: ChatViewModel = hiltViewModel()
                 val chatState by vm.state.collectAsState()
+                val personaVm: PersonaViewModel = hiltViewModel()
+                val personaState by personaVm.state.collectAsState()
 
-                // Load persona if needed
-                LaunchedEffect(personaId) {
-                    if (chatState.activePersona?.id != personaId) {
+                LaunchedEffect(personaId, convId) {
+                    if (convId != null) {
+                        // 1. Load conversation synchronously FIRST
+                        vm.setPendingConversation(convId)
+                        vm.loadConversationSync(convId)
+                        // 2. Then select persona (won't auto-resume because activeConversation is set)
+                        vm.processIntent(ChatIntent.SelectPersona(personaId))
+                    } else {
                         vm.processIntent(ChatIntent.SelectPersona(personaId))
                     }
+                    // 3. Finally load messages
+                    if (convId != null) vm.processIntent(ChatIntent.SelectConversation(convId))
+                }
+
+                // Build persona map for group chat avatar lookup
+                val personaMapForChat = remember(personaState.personas) {
+                    personaState.personas.associateBy { it.id }
                 }
 
                 ChatScreen(
@@ -246,9 +347,68 @@ fun AppNavigation(
                             restoreState = true
                         }
                     },
-                    onNavigateToConversations = null, // No longer needed — use back to go to list
-                    onBack = { navController.popBackStack() }
+                    onNavigateToConversations = null,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToPersonaSettings = {
+                        navController.navigate(Routes.personaSettingsRoute(personaId))
+                    },
+                    userAvatarUri = userAvatarUri,
+                    personaMap = personaMapForChat
                 )
+            }
+
+            // === PER-PERSONA SETTINGS ===
+            composable(
+                route = Routes.PERSONA_SETTINGS,
+                arguments = listOf(navArgument("personaId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                val personaVm: PersonaViewModel = hiltViewModel()
+                val personaState by personaVm.state.collectAsState()
+                val persona = personaState.personas.find { it.id == personaId }
+                val chatVm: ChatViewModel = hiltViewModel()
+                val chatState by chatVm.state.collectAsState()
+
+                // Load voice profiles and API providers
+                val voiceProfiles by voiceRepository.getProfiles().collectAsState(initial = emptyList())
+                val apiProviders by apiProviderRepository.getAll().collectAsState(initial = emptyList())
+
+                if (persona != null) {
+                    PersonaSettingsScreen(
+                        persona = persona,
+                        voiceProfiles = voiceProfiles,
+                        apiProviders = apiProviders,
+                        conversations = chatState.conversations,
+                        onUpdatePersona = { updated ->
+                            personaVm.updateEditingPersona(updated)
+                            personaVm.savePersona()
+                        },
+                        onDeleteConversation = { convId -> chatVm.deleteConversation(convId) },
+                        onOpenConversation = { convId ->
+                            val pId = chatState.conversations.find { it.id == convId }?.personaId
+                            if (pId != null) {
+                                chatVm.processIntent(
+                                    com.aicompanion.feature.chat.presentation.ChatIntent.SelectConversation(convId)
+                                )
+                                navController.navigate(Routes.chatRoute(pId)) {
+                                    popUpTo(Routes.HOME) { saveState = true }
+                                }
+                            }
+                        },
+                        onBack = { navController.popBackStack() },
+                        onEditPersona = {
+                            navController.navigate(Routes.PERSONAS) {
+                                popUpTo(Routes.HOME) { saveState = true }
+                            }
+                        },
+                        onManageStickers = {
+                            navController.navigate("sticker_manage/$personaId")
+                        },
+                        onManageWorldBook = {
+                            navController.navigate(Routes.worldBookRoute(persona.id, persona.name))
+                        }
+                    )
+                }
             }
 
             // === PERSONAS management ===
@@ -270,6 +430,8 @@ fun AppNavigation(
             // === SETTINGS ===
             composable(Routes.SETTINGS) {
                 SettingsScreen(
+                    userAvatarUri = userAvatarUri,
+                    onUserAvatarChanged = { userAvatarUri = it },
                     onBack = {
                         navController.navigate(Routes.HOME) {
                             popUpTo(Routes.HOME) { inclusive = true }
@@ -278,6 +440,7 @@ fun AppNavigation(
                     onNavigateToApiConfig = { navController.navigate(Routes.API_CONFIG) },
                     onNavigateToPersonas = { navController.navigate(Routes.PERSONAS) },
                     onNavigateToMemory = { navController.navigate(Routes.MEMORY) },
+                    onNavigateToProactiveMessages = { navController.navigate(Routes.PROACTIVE_MESSAGES) },
                     onNavigateToVoiceSettings = { navController.navigate(Routes.VOICE_SETTINGS) },
                     onNavigateToVoiceProfiles = { navController.navigate(Routes.VOICE_PROFILES) },
                     onNavigateToLive2DModels = { navController.navigate(Routes.LIVE2D_MODELS) },
@@ -315,10 +478,13 @@ fun AppNavigation(
                     conversations = chatState.conversations,
                     activeId = chatState.activeConversation?.id,
                     onSelect = { id ->
-                        vm.processIntent(ChatIntent.SelectConversation(id))
-                        // Navigate to chat with this conversation's persona
                         val pId = chatState.conversations.find { it.id == id }?.personaId
-                        if (pId != null) navController.navigate(Routes.chatRoute(pId))
+                        if (pId != null) {
+                            vm.processIntent(ChatIntent.SelectConversation(id))
+                            navController.navigate(Routes.chatRoute(pId)) {
+                                popUpTo(Routes.HOME) { saveState = true }
+                            }
+                        }
                     },
                     onNew = {
                         vm.processIntent(ChatIntent.NewConversation)
@@ -343,6 +509,49 @@ fun AppNavigation(
             }
             composable(Routes.OEM_GUIDE) {
                 OEMGuideScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.PROACTIVE_MESSAGES) {
+                val personaVm: PersonaViewModel = hiltViewModel()
+                val personaState by personaVm.state.collectAsState()
+                ProactiveMessageSettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    personas = personaState.personas,
+                    onReschedule = {
+                        val settings = com.aicompanion.core.common.ProactiveSettings(context)
+                        com.aicompanion.app.proactive.ProactiveMessageWorker.schedule(context, settings)
+                    },
+                    onCancel = {
+                        com.aicompanion.app.proactive.ProactiveMessageWorker.cancel(context)
+                    }
+                )
+            }
+            composable(
+                route = Routes.STICKER_MANAGE,
+                arguments = listOf(navArgument("personaId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                StickerManageScreen(
+                    personaId = personaId,
+                    repository = stickerRepository,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Routes.WORLD_BOOK,
+                arguments = listOf(
+                    navArgument("personaId") { type = NavType.StringType },
+                    navArgument("personaName") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                val personaName = backStackEntry.arguments?.getString("personaName") ?: ""
+                WorldBookScreen(
+                    personaId = personaId,
+                    personaName = personaName,
+                    repository = worldBookRepository,
+                    onBack = { navController.popBackStack() }
+                )
             }
         }
     }

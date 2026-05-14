@@ -7,16 +7,26 @@ import com.google.gson.reflect.TypeToken
 
 private val gson = Gson()
 
-fun ConversationEntity.toDomain() = Conversation(
-    id = id, personaId = personaId, apiProviderId = apiProviderId,
-    title = title, createdAt = createdAt, lastMessageAt = lastMessageAt,
-    isPinned = isPinned, isArchived = isArchived
-)
+fun ConversationEntity.toDomain(): Conversation {
+    val groupIds: List<String> = try {
+        gson.fromJson(groupPersonaIdsJson, object : TypeToken<List<String>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    return Conversation(
+        id = id, personaId = personaId, apiProviderId = apiProviderId,
+        title = title, lastMessagePreview = lastMessagePreview,
+        createdAt = createdAt, lastMessageAt = lastMessageAt,
+        isPinned = isPinned, isArchived = isArchived,
+        isGroupChat = isGroupChat, groupPersonaIds = groupIds,
+        avatarImageUri = avatarImageUri
+    )
+}
 
 fun MessageEntity.toDomain() = Message(
     id = id, conversationId = conversationId, role = role,
     content = content, emotion = emotion, tokenCount = tokenCount,
-    metadataJson = metadataJson, createdAt = createdAt
+    metadataJson = metadataJson, createdAt = createdAt,
+    branchParentId = branchParentId, branchIndex = branchIndex,
+    senderPersonaId = senderPersonaId
 )
 
 fun PersonaEntity.toDomain(): Persona {
@@ -37,8 +47,9 @@ fun PersonaEntity.toDomain(): Persona {
         scenario = scenario, firstMessage = firstMessage,
         exampleChats = exampleChats, tags = tags,
         specVersion = specVersion, creator = creator,
+        voiceProfileId = voiceProfileId, apiProviderId = apiProviderId,
         avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
-        isPreset = isPreset, createdAt = createdAt
+        authorsNote = authorsNote, waifuMode = waifuMode, isPreset = isPreset, createdAt = createdAt
     )
 }
 
@@ -67,6 +78,12 @@ fun VoiceProfileEntity.toDomain() = VoiceProfile(
     isActive = isActive, createdAt = createdAt
 )
 
+fun VoiceProfile.toEntity() = VoiceProfileEntity(
+    id = id, name = name, engineType = engineType,
+    voiceId = voiceId, pitch = pitch, speed = speed,
+    isActive = isActive, createdAt = createdAt
+)
+
 fun Live2DModelInfoEntity.toDomain() = Live2DModelInfo(
     id = id, name = name, modelJsonPath = modelJsonPath,
     thumbnailPath = thumbnailPath, isBuiltIn = isBuiltIn,
@@ -82,8 +99,9 @@ fun Persona.toEntity() = PersonaEntity(
     scenario = scenario, firstMessage = firstMessage,
     exampleChatsJson = gson.toJson(exampleChats), tagsJson = gson.toJson(tags),
     specVersion = specVersion, creator = creator,
+    voiceProfileId = voiceProfileId, apiProviderId = apiProviderId,
     avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
-    isPreset = isPreset, createdAt = createdAt
+    authorsNote = authorsNote, waifuMode = waifuMode, isPreset = isPreset, createdAt = createdAt
 )
 
 fun ApiProvider.toEntity() = ApiProviderEntity(
@@ -102,12 +120,40 @@ fun MemoryEntry.toEntity() = MemoryEntryEntity(
 
 fun Conversation.toEntity() = ConversationEntity(
     id = id, personaId = personaId, apiProviderId = apiProviderId,
-    title = title, createdAt = createdAt, lastMessageAt = lastMessageAt,
-    isPinned = isPinned, isArchived = isArchived
+    title = title, lastMessagePreview = lastMessagePreview,
+    createdAt = createdAt, lastMessageAt = lastMessageAt,
+    isPinned = isPinned, isArchived = isArchived,
+    isGroupChat = isGroupChat, groupPersonaIdsJson = gson.toJson(groupPersonaIds),
+    avatarImageUri = avatarImageUri
 )
 
 fun Message.toEntity() = MessageEntity(
     id = id, conversationId = conversationId, role = role,
     content = content, emotion = emotion, tokenCount = tokenCount,
-    metadataJson = metadataJson, createdAt = createdAt
+    metadataJson = metadataJson, createdAt = createdAt,
+    branchParentId = branchParentId, branchIndex = branchIndex,
+    senderPersonaId = senderPersonaId
+)
+
+// World Book
+fun WorldBookEntity.toDomain(): WorldBookEntry {
+    val keywords: List<String> = try {
+        gson.fromJson(keywordsJson, object : TypeToken<List<String>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    val secondary: List<String> = try {
+        gson.fromJson(secondaryKeywordsJson, object : TypeToken<List<String>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    return WorldBookEntry(
+        id = id, personaId = personaId, key = key, content = content,
+        keywords = keywords, secondaryKeywords = secondary,
+        priority = priority, enabled = enabled, constant = constant,
+        position = position, depth = depth, createdAt = createdAt
+    )
+}
+
+fun WorldBookEntry.toEntity() = WorldBookEntity(
+    id = id, personaId = personaId, key = key, content = content,
+    keywordsJson = gson.toJson(keywords), secondaryKeywordsJson = gson.toJson(secondaryKeywords),
+    priority = priority, enabled = enabled, constant = constant,
+    position = position, depth = depth, createdAt = createdAt
 )

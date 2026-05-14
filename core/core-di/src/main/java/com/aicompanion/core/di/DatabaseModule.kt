@@ -40,4 +40,6 @@ object DatabaseModule {
     @Provides fun provideMemoryEntryDao(db: AICompanionDatabase): MemoryEntryDao = db.memoryEntryDao()
     @Provides fun provideVoiceProfileDao(db: AICompanionDatabase): VoiceProfileDao = db.voiceProfileDao()
     @Provides fun provideLive2DModelDao(db: AICompanionDatabase): Live2DModelInfoDao = db.live2DModelInfoDao()
+    @Provides fun provideStickerDao(db: AICompanionDatabase): StickerDao = db.stickerDao()
+    @Provides fun provideWorldBookDao(db: AICompanionDatabase): WorldBookDao = db.worldBookDao()
 }

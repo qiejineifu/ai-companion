@@ -1,8 +1,11 @@
 package com.aicompanion.feature.persona.presentation
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aicompanion.core.common.Result
+import com.aicompanion.core.common.TavernCardParser
 import com.aicompanion.core.common.newId
 import com.aicompanion.core.common.now
 import com.aicompanion.core.common.onSuccess
@@ -22,7 +25,8 @@ data class PersonaUiState(
     val newTraitKey: String = "",
     val newTraitValue: String = "",
     val newExampleChat: String = "",
-    val newTag: String = ""
+    val newTag: String = "",
+    val importMessage: String? = null
 )
 
 @HiltViewModel
@@ -159,5 +163,41 @@ class PersonaViewModel @Inject constructor(
         viewModelScope.launch {
             repository.create(persona.copy(id = newId(), name = "${persona.name}(副本)", isPreset = false, createdAt = now()))
         }
+    }
+
+    fun importFromTavernCard(uri: Uri, context: Context) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, importMessage = null) }
+            val parsed = TavernCardParser.parse(context, uri)
+            if (parsed == null) {
+                _state.update { it.copy(isLoading = false, importMessage = "无法解析角色卡，请确认文件格式正确") }
+                return@launch
+            }
+
+            val persona = Persona(
+                id = newId(),
+                name = parsed.name,
+                description = parsed.description,
+                systemPrompt = parsed.systemPrompt.ifBlank {
+                    parsed.personality.ifBlank { "你是${parsed.name}。" }
+                },
+                scenario = parsed.scenario,
+                firstMessage = parsed.firstMessage,
+                exampleChats = parsed.exampleChats,
+                tags = parsed.tags,
+                specVersion = parsed.specVersion,
+                creator = parsed.creator,
+                createdAt = now()
+            )
+
+            repository.create(persona).onSuccess {
+                _state.update { it.copy(isLoading = false, importMessage = "成功导入: ${parsed.name}") }
+            }
+            _state.update { it.copy(isLoading = false) }
+        }
+    }
+
+    fun clearImportMessage() {
+        _state.update { it.copy(importMessage = null) }
     }
 }

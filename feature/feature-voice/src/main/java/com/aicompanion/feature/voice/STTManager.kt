@@ -28,7 +28,7 @@ sealed class STTEvent {
 
 @Singleton
 class STTManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext val context: Context
 ) {
     private var speechRecognizer: SpeechRecognizer? = null
     private val eventChannel = Channel<STTEvent>(Channel.BUFFERED)

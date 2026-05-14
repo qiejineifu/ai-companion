@@ -101,4 +101,8 @@ dependencies {
 
     // Coil
     implementation(libs.coil.compose)
+
+    // WorkManager
+    implementation(libs.work.runtime.ktx)
+    implementation(libs.hilt.work)
 }

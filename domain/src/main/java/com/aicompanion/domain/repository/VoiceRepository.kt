@@ -7,6 +7,8 @@ interface VoiceRepository {
     fun getProfiles(): Flow<List<VoiceProfile>>
     suspend fun getActiveProfile(): VoiceProfile?
     suspend fun setActive(id: String)
+    suspend fun createProfile(profile: VoiceProfile)
+    suspend fun deleteProfile(id: String)
     suspend fun synthesize(text: String, profile: VoiceProfile): ByteArray?
     suspend fun startListening(): Flow<String>
     suspend fun stopListening()

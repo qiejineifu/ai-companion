@@ -1,5 +1,8 @@
 package com.aicompanion.feature.chat.presentation
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,25 +34,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.aicompanion.core.ui.theme.*
 import com.aicompanion.domain.model.Persona
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-// Palette
-private val Pink50 = Color(0xFFFFF0F5)
-private val Pink100 = Color(0xFFFFE0EC)
-private val Pink200 = Color(0xFFFFC0D8)
-private val Pink400 = Color(0xFFFF85A2)
-private val Pink500 = Color(0xFFFF6B8A)
-private val Pink600 = Color(0xFFF04F7A)
-private val Pink700 = Color(0xFFE0386A)
-private val Purple100 = Color(0xFFF3E8FF)
-private val Purple400 = Color(0xFFC4A5E8)
-private val ChatBg = Color(0xFFFFF5F7)
-private val TextDarkC = Color(0xFF2D1B2E)
-private val TextGrayC = Color(0xFF9B8EA0)
-private val DividerColorC = Color(0xFFF0E0E8)
 
 @Composable
 fun ChatScreen(
@@ -59,10 +49,15 @@ fun ChatScreen(
     onNavigateToMemory: (() -> Unit)? = null,
     onNavigateToSettings: () -> Unit,
     onNavigateToConversations: (() -> Unit)? = null,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onNavigateToPersonaSettings: (() -> Unit)? = null,
+    userAvatarUri: String? = null,
+    personaMap: Map<String, com.aicompanion.domain.model.Persona> = emptyMap()
 ) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
+    var showRename by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
 
     LaunchedEffect(state.messages.size, state.streamState) {
         if (state.messages.isNotEmpty()) {
@@ -78,9 +73,9 @@ fun ChatScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.horizontalGradient(listOf(Pink500, Pink600, Pink700)))
+                .background(Brush.horizontalGradient(topBarGradient))
                 .statusBarsPadding()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (onBack != null) {
@@ -91,20 +86,80 @@ fun ChatScreen(
                 }
             }
 
-            Box(
-                modifier = Modifier.size(38.dp).clip(CircleShape)
+            val isGroup = state.activeConversation?.isGroupChat == true
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val groupAvatarUri = state.activeConversation?.avatarImageUri
+
+            val groupAvatarPicker = rememberLauncherForActivityResult(
+                ActivityResultContracts.GetContent()
+            ) { uri: android.net.Uri? ->
+                uri?.let {
+                    val input = context.contentResolver.openInputStream(it)
+                    val ext = context.contentResolver.getType(it)?.let { t ->
+                        if (t.contains("png")) ".png" else ".jpg"
+                    } ?: ".jpg"
+                    val dest = java.io.File(context.filesDir, "group_avatars/${state.activeConversation?.id}$ext")
+                    dest.parentFile?.mkdirs()
+                    input?.use { src -> dest.outputStream().use { out -> src.copyTo(out) } }
+                    val newUri = dest.toURI().toString()
+                    // Update conversation avatar
+                    viewModel.updateConversationAvatar(state.activeConversation?.id ?: "", newUri)
+                }
+            }
+
+            if (isGroup) {
+                // Group chat avatar
+                val avatarModifier = Modifier.size(38.dp).clip(CircleShape)
                     .border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape)
-                    .background(Pink200),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(state.activePersona?.name?.take(1) ?: "♥", color = Pink600,
-                    fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    .let { mod ->
+                        if (groupAvatarUri == null) mod.background(Brush.horizontalGradient(listOf(Pink400, Pink600)))
+                        else mod.background(Color.Transparent)
+                    }
+                    .clickable { groupAvatarPicker.launch("image/*") }
+                Box(
+                    modifier = avatarModifier,
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (groupAvatarUri != null) {
+                        AsyncImage(
+                            model = groupAvatarUri, contentDescription = null,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        Text("👥", fontSize = 18.sp)
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.size(38.dp).clip(CircleShape)
+                        .border(2.dp, Color.White.copy(alpha = 0.6f), CircleShape)
+                        .background(Pink200),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val avatarUri = state.activePersona?.avatarImageUri
+                    if (avatarUri != null) {
+                        AsyncImage(
+                            model = avatarUri, contentDescription = null,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        Text(state.activePersona?.name?.take(1) ?: "♥", color = Pink600,
+                            fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
             }
             Spacer(Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(state.activePersona?.name ?: "AI 陪伴", color = Color.White,
-                    fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (isGroup) {
+                    Text(state.activeConversation?.title ?: "群聊", color = Color.White,
+                        fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                } else {
+                    Text(state.activePersona?.name ?: "AI 陪伴", color = Color.White,
+                        fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                }
                 if (state.activeApiProvider != null) {
                     Text("${state.activeApiProvider?.name} · ${state.activeApiProvider?.modelName}",
                         color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
@@ -114,8 +169,46 @@ fun ChatScreen(
             IconButton(onClick = { viewModel.processIntent(ChatIntent.NewConversation) }) {
                 Icon(Icons.Default.Add, "新建", tint = Color.White)
             }
-            IconButton(onClick = onNavigateToSettings) {
-                Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
+            if (isGroup) {
+                var showGroupMenu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { showGroupMenu = true }) {
+                        Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
+                    }
+                    DropdownMenu(expanded = showGroupMenu, onDismissRequest = { showGroupMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("修改群聊名称") },
+                            onClick = {
+                                showGroupMenu = false
+                                renameText = state.activeConversation?.title ?: "群聊"
+                                showRename = true
+                            },
+                            leadingIcon = { Icon(Icons.Default.Edit, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("更换群聊头像") },
+                            onClick = {
+                                showGroupMenu = false
+                                groupAvatarPicker.launch("image/*")
+                            },
+                            leadingIcon = { Icon(Icons.Default.Image, null) }
+                        )
+                        HorizontalDivider(color = DividerPink)
+                        DropdownMenuItem(
+                            text = { Text("删除群聊", color = Pink600) },
+                            onClick = {
+                                showGroupMenu = false
+                                viewModel.hardDeleteConversation(state.activeConversation?.id ?: "")
+                                onBack?.invoke()
+                            },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = Pink600) }
+                        )
+                    }
+                }
+            } else {
+                IconButton(onClick = onNavigateToPersonaSettings ?: onNavigateToSettings) {
+                    Icon(Icons.Default.MoreVert, "更多", tint = Color.White)
+                }
             }
         }
 
@@ -134,7 +227,15 @@ fun ChatScreen(
                         messages = state.messages,
                         streamState = state.streamState,
                         listState = listState,
-                        personaName = state.activePersona?.name ?: "AI"
+                        personaName = state.activePersona?.name ?: "AI",
+                        personaAvatarUri = state.activePersona?.avatarImageUri,
+                        userAvatarUri = userAvatarUri,
+                        currentStickerUri = state.currentStickerUri,
+                        branchSelections = state.branchSelections,
+                        isGroupChat = state.activeConversation?.isGroupChat == true,
+                        personaMap = personaMap,
+                        onRegenerate = { msgId -> viewModel.processIntent(ChatIntent.Regenerate(msgId)) },
+                        onSwitchBranch = { key, idx -> viewModel.processIntent(ChatIntent.SwitchBranch(key, idx)) }
                     )
                 }
             }
@@ -149,6 +250,29 @@ fun ChatScreen(
                     }
                 ) { Text(state.error!!) }
             }
+        }
+
+        // Rename dialog (group chat)
+        if (showRename) {
+            AlertDialog(
+                onDismissRequest = { showRename = false },
+                title = { Text("修改群聊名称") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        label = { Text("群聊名称") },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.renameConversation(state.activeConversation?.id ?: "", renameText)
+                        showRename = false
+                    }) { Text("确定") }
+                },
+                dismissButton = { TextButton(onClick = { showRename = false }) { Text("取消") } }
+            )
         }
 
         // === Character card (compact, when empty) ===
@@ -192,9 +316,9 @@ private fun CharacterProfileCard(persona: Persona) {
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(persona.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDarkC)
+                Text(persona.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
                 if (persona.description.isNotBlank()) {
-                    Text(persona.description, fontSize = 13.sp, color = TextGrayC, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(persona.description, fontSize = 13.sp, color = TextGray, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (persona.tags.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
@@ -218,7 +342,7 @@ private fun WelcomeWithCharacter(persona: Persona?, onSelectPersona: () -> Unit,
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("♥", fontSize = 48.sp, color = Pink400)
                 Spacer(Modifier.height(16.dp))
-                Text("选择一个角色开始对话吧", color = TextGrayC)
+                Text("选择一个角色开始对话吧", color = TextGray)
                 Spacer(Modifier.height(24.dp))
                 Button(onClick = onSelectPersona, colors = ButtonDefaults.buttonColors(containerColor = Pink500)) { Text("选择人设") }
                 Spacer(Modifier.height(12.dp))
@@ -235,10 +359,10 @@ private fun WelcomeWithCharacter(persona: Persona?, onSelectPersona: () -> Unit,
                         Text(persona.name.take(2), fontSize = 36.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(16.dp))
-                    Text(persona.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDarkC)
+                    Text(persona.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDark)
                     if (persona.description.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
-                        Text(persona.description, fontSize = 14.sp, color = TextGrayC)
+                        Text(persona.description, fontSize = 14.sp, color = TextGray)
                     }
                     if (persona.scenario.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
@@ -259,7 +383,7 @@ private fun WelcomeWithCharacter(persona: Persona?, onSelectPersona: () -> Unit,
                         Spacer(Modifier.height(16.dp))
                         DividerLine()
                         Spacer(Modifier.height(12.dp))
-                        Text(persona.firstMessage, fontSize = 14.sp, color = TextGrayC,
+                        Text(persona.firstMessage, fontSize = 14.sp, color = TextGray,
                             modifier = Modifier.background(Color.White, RoundedCornerShape(12.dp)).padding(16.dp))
                     }
                     Spacer(Modifier.height(24.dp))
@@ -272,9 +396,9 @@ private fun WelcomeWithCharacter(persona: Persona?, onSelectPersona: () -> Unit,
 @Composable
 private fun DividerLine() {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).height(1.dp).background(DividerColorC))
+        Box(Modifier.weight(1f).height(1.dp).background(DividerPink))
         Text(" ✦ ", color = Pink400, fontSize = 12.sp)
-        Box(Modifier.weight(1f).height(1.dp).background(DividerColorC))
+        Box(Modifier.weight(1f).height(1.dp).background(DividerPink))
     }
 }
 
@@ -284,8 +408,32 @@ private fun MessageList(
     messages: List<MessageUi>,
     streamState: StreamState,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    personaName: String
+    personaName: String,
+    personaAvatarUri: String? = null,
+    userAvatarUri: String? = null,
+    currentStickerUri: String? = null,
+    branchSelections: Map<String, Int> = emptyMap(),
+    isGroupChat: Boolean = false,
+    personaMap: Map<String, Persona> = emptyMap(),
+    onRegenerate: (String) -> Unit = {},
+    onSwitchBranch: (String, Int) -> Unit = { _, _ -> }
 ) {
+    // Deduplicate branches: for each branchKey group, only show the selected branch
+    val displayMessages = remember(messages, branchSelections) {
+        val groups = LinkedHashMap<String, MutableList<MessageUi>>()
+        for (msg in messages) {
+            groups.getOrPut(msg.branchKey) { mutableListOf() }.add(msg)
+        }
+        groups.mapNotNull { (key, variants) ->
+            val selectedIdx = branchSelections[key] ?: variants.maxByOrNull { it.branchIndex }?.branchIndex ?: 0
+            variants.find { it.branchIndex == selectedIdx } ?: variants.firstOrNull()
+        }
+    }
+
+    // Count branches per group
+    val branchCounts = remember(messages) {
+        messages.groupBy { it.branchKey }.mapValues { it.value.size }
+    }
     val timeFormat = remember { SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault()) }
     var lastTimeShown by remember { mutableStateOf(0L) }
     var lastDate by remember { mutableStateOf("") }
@@ -296,7 +444,7 @@ private fun MessageList(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        messages.forEachIndexed { index, message ->
+        displayMessages.forEachIndexed { index, message ->
             val msgTime = message.createdAt
             val dateStr = SimpleDateFormat("MM月dd日", Locale.getDefault()).format(Date(msgTime))
 
@@ -304,7 +452,7 @@ private fun MessageList(
                 item(key = "date_$dateStr") {
                     Text(dateStr, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        color = TextGrayC, fontSize = 13.sp)
+                        color = TextGray, fontSize = 13.sp)
                 }
                 lastDate = dateStr
                 lastTimeShown = 0L
@@ -313,7 +461,7 @@ private fun MessageList(
                 item(key = "time_${msgTime}") {
                     Text(timeFormat.format(Date(msgTime)), modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        color = TextGrayC, fontSize = 12.sp)
+                        color = TextGray, fontSize = 12.sp)
                 }
             }
             lastTimeShown = msgTime
@@ -325,12 +473,56 @@ private fun MessageList(
                     verticalAlignment = Alignment.Bottom
                 ) {
                     if (!isUser) {
-                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Pink200), contentAlignment = Alignment.Center) {
-                            Text(personaName.take(1), fontSize = 14.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                        val isGroupMsg = isGroupChat && message.senderPersonaId != null
+                        // Look up persona in real-time, not from cached MessageUi fields
+                        val senderPersona = if (isGroupMsg) personaMap[message.senderPersonaId] else null
+                        val senderName = senderPersona?.name
+                        val senderAvatar = senderPersona?.avatarImageUri
+                        val displayName = senderName ?: personaName
+
+                        val avatarColors = listOf(
+                            Pink400, Color(0xFF64B5F6), Color(0xFF81C784),
+                            Color(0xFFFFB74D), Purple400, Color(0xFF4DD0E1)
+                        )
+                        val colorIndex = kotlin.math.abs(displayName.hashCode()) % avatarColors.size
+
+                        Box(
+                            modifier = Modifier.size(32.dp).clip(CircleShape)
+                                .background(if (isGroupMsg) avatarColors[colorIndex] else Pink200),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (senderAvatar != null) {
+                                AsyncImage(model = senderAvatar, contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                            } else if (!isGroupMsg && personaAvatarUri != null) {
+                                AsyncImage(model = personaAvatarUri, contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                            } else {
+                                Text(displayName.take(1), fontSize = 14.sp,
+                                    color = if (isGroupMsg) Color.White else Pink600,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (isGroupMsg && senderName != null) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(senderName, fontSize = 10.sp, color = TextGray)
                         }
                         Spacer(Modifier.width(8.dp))
                     }
                     Column(modifier = Modifier.widthIn(max = 260.dp)) {
+                        // Sticker image above AI bubble
+                        if (!isUser && currentStickerUri != null) {
+                            AsyncImage(
+                                model = currentStickerUri, contentDescription = "表情",
+                                modifier = Modifier
+                                    .width(120.dp).aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .padding(bottom = 4.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        }
                         Surface(
                             shape = if (isUser) RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
                                 else RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
@@ -342,11 +534,43 @@ private fun MessageList(
                                 else MarkdownMsg(text = message.content + if (message.isStreaming) "▊" else "")
                             }
                         }
+
+                        // Branch controls for AI messages
+                        if (!isUser && !message.isStreaming) {
+                            val count = branchCounts[message.branchKey] ?: 1
+                            val currentIdx = branchSelections[message.branchKey] ?: message.branchIndex
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Regenerate button
+                                IconButton(onClick = { onRegenerate(message.id) }, modifier = Modifier.size(28.dp)) {
+                                    Icon(Icons.Default.Refresh, "重新生成", tint = TextGray, modifier = Modifier.size(16.dp))
+                                }
+                                // Branch navigation
+                                if (count > 1) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Pink50)
+                                            .clickable { onSwitchBranch(message.branchKey, (currentIdx + 1) % count) }
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("${currentIdx + 1}/$count", fontSize = 11.sp, color = Pink500)
+                                        Icon(Icons.Default.ChevronRight, null, tint = Pink400, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                        }
                     }
                     if (isUser) {
                         Spacer(Modifier.width(8.dp))
                         Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Purple100), contentAlignment = Alignment.Center) {
-                            Text("我", fontSize = 11.sp, color = Purple400, fontWeight = FontWeight.Bold)
+                            if (userAvatarUri != null) {
+                                AsyncImage(model = userAvatarUri, contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                            } else {
+                                Text("我", fontSize = 11.sp, color = Purple400, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -357,13 +581,19 @@ private fun MessageList(
             item(key = "streaming") {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start, verticalAlignment = Alignment.Bottom) {
                     Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Pink200), contentAlignment = Alignment.Center) {
-                        Text(personaName.take(1), fontSize = 14.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                        if (personaAvatarUri != null) {
+                            AsyncImage(model = personaAvatarUri, contentDescription = null,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        } else {
+                            Text(personaName.take(1), fontSize = 14.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                        }
                     }
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.widthIn(max = 260.dp)) {
                         Surface(shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp), color = Color.White, shadowElevation = 0.5.dp) {
                             Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Text("${streamState.partialText}▊", fontSize = 15.sp, color = TextDarkC, lineHeight = 22.sp)
+                                Text("${streamState.partialText}▊", fontSize = 15.sp, color = TextDark, lineHeight = 22.sp)
                             }
                         }
                     }
@@ -395,7 +625,7 @@ private fun parseMarkdown(text: String): AnnotatedString = buildAnnotatedString 
             chars.size > i + 2 && String(chars, i, 2) == "**" -> {
                 val end = text.indexOf("**", i + 2)
                 if (end > i) {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextDarkC)) { append(text.substring(i + 2, end)) }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextDark)) { append(text.substring(i + 2, end)) }
                     i = end + 2
                 } else { append(chars[i]); i++ }
             }
@@ -406,7 +636,7 @@ private fun parseMarkdown(text: String): AnnotatedString = buildAnnotatedString 
                     i = end + 1
                 } else { append(chars[i]); i++ }
             }
-            else -> { withStyle(SpanStyle(color = TextDarkC)) { append(chars[i]) }; i++ }
+            else -> { withStyle(SpanStyle(color = TextDark)) { append(chars[i]) }; i++ }
         }
     }
 }
@@ -437,9 +667,9 @@ fun ChatInputBar(
                     .then(if (text.isNotEmpty()) Modifier.border(1.5.dp, Pink200, RoundedCornerShape(22.dp)) else Modifier)
                     .padding(horizontal = 18.dp, vertical = 11.dp)
             ) {
-                if (text.isEmpty()) Text("说点什么吧...", color = TextGrayC.copy(alpha = 0.6f), fontSize = 15.sp)
+                if (text.isEmpty()) Text("说点什么吧...", color = TextGray.copy(alpha = 0.6f), fontSize = 15.sp)
                 BasicTextField(value = text, onValueChange = onTextChange,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextDarkC, fontSize = 15.sp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextDark, fontSize = 15.sp),
                     cursorBrush = SolidColor(Pink500), modifier = Modifier.fillMaxWidth(), maxLines = 4, singleLine = false)
             }
             Spacer(Modifier.width(8.dp))
@@ -449,7 +679,7 @@ fun ChatInputBar(
                 }
             } else {
                 IconButton(onClick = onVoice, modifier = Modifier.size(42.dp)) {
-                    Icon(Icons.Default.Mic, "语音", tint = if (isRecording) Pink600 else TextGrayC, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Mic, "语音", tint = if (isRecording) Pink600 else TextGray, modifier = Modifier.size(22.dp))
                 }
                 IconButton(
                     onClick = { if (text.isNotBlank()) { onSend(text.trim()); onTextChange("") } },
@@ -486,15 +716,15 @@ fun ConversationSidebar(
                     }
                 }
                 if (conversations.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无对话", color = TextGrayC) }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无对话", color = TextGray) }
                 } else {
                     LazyColumn {
                         itemsIndexed(conversations, key = { _, c -> c.id }) { _, conv ->
                             ListItem(
-                                headlineContent = { Text(conv.title, maxLines = 1, fontSize = 15.sp, color = TextDarkC) },
+                                headlineContent = { Text(conv.title, maxLines = 1, fontSize = 15.sp, color = TextDark) },
                                 supportingContent = {
                                     val fmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()) }
-                                    Text(fmt.format(Date(conv.lastMessageAt)), fontSize = 12.sp, color = TextGrayC)
+                                    Text(fmt.format(Date(conv.lastMessageAt)), fontSize = 12.sp, color = TextGray)
                                 },
                                 modifier = Modifier.clickable { onSelect(conv.id); onDismiss() },
                                 colors = if (conv.id == activeId) ListItemDefaults.colors(containerColor = Pink50) else ListItemDefaults.colors()

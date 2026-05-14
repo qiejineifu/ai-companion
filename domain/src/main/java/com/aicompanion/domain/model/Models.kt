@@ -5,10 +5,14 @@ data class Conversation(
     val personaId: String,
     val apiProviderId: String,
     val title: String,
+    val lastMessagePreview: String = "",
     val createdAt: Long,
     val lastMessageAt: Long,
     val isPinned: Boolean = false,
-    val isArchived: Boolean = false
+    val isArchived: Boolean = false,
+    val isGroupChat: Boolean = false,
+    val groupPersonaIds: List<String> = emptyList(),
+    val avatarImageUri: String? = null
 )
 
 data class Message(
@@ -19,7 +23,10 @@ data class Message(
     val emotion: String? = null,
     val tokenCount: Int = 0,
     val metadataJson: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    val branchParentId: String? = null,
+    val branchIndex: Int = 0,
+    val senderPersonaId: String? = null
 )
 
 data class Persona(
@@ -38,8 +45,13 @@ data class Persona(
     val tags: List<String> = emptyList(),
     val specVersion: String = "",
     val creator: String = "",
+    // Per-persona overrides
+    val voiceProfileId: String? = null,
+    val apiProviderId: String? = null,
     val avatarImageUri: String? = null,
     val defaultModelPath: String? = null,
+    val authorsNote: String = "",
+    val waifuMode: Boolean = false,
     val isPreset: Boolean = false,
     val createdAt: Long
 )
@@ -99,9 +111,35 @@ data class Live2DModelInfo(
     val importedAt: Long
 )
 
+data class StickerItem(
+    val id: String,
+    val personaId: String,
+    val emotion: String,
+    val imagePath: String,
+    val createdAt: Long
+)
+
+data class WorldBookEntry(
+    val id: String,
+    val personaId: String,
+    val key: String,
+    val content: String,
+    val keywords: List<String> = emptyList(),
+    val secondaryKeywords: List<String> = emptyList(),
+    val priority: Int = 10,
+    val enabled: Boolean = true,
+    val constant: Boolean = false,
+    val position: String = "before",
+    val depth: Int = 4,
+    val createdAt: Long
+)
+
 data class ChatContext(
     val persona: Persona,
     val messages: List<Message>,
     val memories: List<MemoryEntry>,
-    val provider: ApiProvider
+    val provider: ApiProvider,
+    val worldBookEntries: List<WorldBookEntry> = emptyList(),
+    val groupPersonas: List<Persona> = emptyList(),
+    val isGroupSpeakerTurn: Boolean = false
 )

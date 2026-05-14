@@ -16,8 +16,16 @@ data class ChatUiState(
     val activeApiProvider: ApiProvider? = null,
     val retrievedMemories: List<MemoryEntry> = emptyList(),
     val showPersonaPicker: Boolean = false,
+    val showGroupPicker: Boolean = false,
     val showSidebar: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val currentStickerUri: String? = null,
+    val branchSelections: Map<String, Int> = emptyMap(),
+    val pendingConversationId: String? = null,
+    // Group chat round-robin state
+    val groupSpeakingQueue: List<String> = emptyList(),
+    val currentSpeakerPersonaId: String? = null,
+    val groupRoundIndex: Int = 0
 )
 
 sealed class StreamState {
@@ -35,8 +43,12 @@ sealed class ChatIntent {
     data class DeleteMessage(val messageId: String) : ChatIntent()
     data class SelectConversation(val id: String) : ChatIntent()
     object NewConversation : ChatIntent()
+    object ShowGroupPicker : ChatIntent()
+    data class StartGroupChat(val personaIds: List<String>, val conversationId: String = com.aicompanion.core.common.newId()) : ChatIntent()
     data class SelectPersona(val personaId: String) : ChatIntent()
     object ToggleVoiceMode : ChatIntent()
+    data class Regenerate(val messageId: String) : ChatIntent()
+    data class SwitchBranch(val branchKey: String, val index: Int) : ChatIntent()
     object ToggleSidebar : ChatIntent()
     data class UpdateInput(val text: String) : ChatIntent()
     object DismissError : ChatIntent()
@@ -48,10 +60,19 @@ data class MessageUi(
     val content: String,
     val emotion: String? = null,
     val isStreaming: Boolean = false,
-    val createdAt: Long
-)
+    val createdAt: Long,
+    val branchParentId: String? = null,
+    val branchIndex: Int = 0,
+    val senderPersonaId: String? = null,
+    val senderPersonaName: String? = null,
+    val senderAvatarUri: String? = null
+) {
+    val branchKey: String get() = branchParentId ?: id
+}
 
 fun Message.toUi(isStreaming: Boolean = false) = MessageUi(
     id = id, role = role, content = content,
-    emotion = emotion, isStreaming = isStreaming, createdAt = createdAt
+    emotion = emotion, isStreaming = isStreaming, createdAt = createdAt,
+    branchParentId = branchParentId, branchIndex = branchIndex,
+    senderPersonaId = senderPersonaId
 )

@@ -4,6 +4,7 @@ import android.content.Context
 import com.aicompanion.core.database.dao.*
 import com.aicompanion.core.network.HttpClientFactory
 import com.aicompanion.core.network.SSEClient
+import com.aicompanion.core.database.dao.StickerDao
 import com.aicompanion.data.repository.*
 import com.aicompanion.domain.repository.*
 import com.aicompanion.domain.usecase.*
@@ -44,6 +45,12 @@ object RepositoryModule {
     fun provideLive2DModelRepository(
         dao: Live2DModelInfoDao, @ApplicationContext context: Context
     ): Live2DModelRepository = Live2DModelRepositoryImpl(dao, context)
+
+    @Provides @Singleton
+    fun provideStickerRepository(dao: StickerDao): StickerRepository = StickerRepositoryImpl(dao)
+
+    @Provides @Singleton
+    fun provideWorldBookRepository(dao: WorldBookDao): WorldBookRepository = WorldBookRepositoryImpl(dao)
 
     // UseCases
     @Provides fun provideSendMessageUseCase(repo: ChatRepository) = SendMessageUseCase(repo)

@@ -40,16 +40,40 @@ class ChatRepositoryImpl(
         }
     }
 
+    override suspend fun createFullConversation(conversation: Conversation): Result<Conversation> {
+        return try {
+            val existing = conversationDao.getById(conversation.id)
+            if (existing != null) {
+                conversationDao.update(conversation.toEntity())
+            } else {
+                conversationDao.insert(conversation.toEntity())
+            }
+            Result.Success(conversation)
+        } catch (e: Exception) {
+            Result.Error("保存对话失败: ${e.message}", e)
+        }
+    }
+
+    override suspend fun saveMessage(message: Message) {
+        messageDao.insert(message.toEntity())
+    }
+
+    override suspend fun getConversationById(id: String): Conversation? {
+        return conversationDao.getById(id)?.toDomain()
+    }
+
     override suspend fun sendMessage(
         conversationId: String, content: String, context: ChatContext
     ): Flow<Result<String>> = flow {
-        // 1. Save user message
-        val userMsg = Message(
-            id = newId(), conversationId = conversationId,
-            role = "user", content = content, createdAt = now()
-        )
-        messageDao.insert(userMsg.toEntity())
-        conversationDao.updateLastMessageTime(conversationId, now())
+        // 1. Save user message (skip for group speaker turns)
+        if (!context.isGroupSpeakerTurn) {
+            val userMsg = Message(
+                id = newId(), conversationId = conversationId,
+                role = "user", content = content, createdAt = now()
+            )
+            messageDao.insert(userMsg.toEntity())
+            conversationDao.updateLastMessage(conversationId, now(), content)
+        }
 
         // 2. Build messages for API
         val apiMessages = buildApiMessages(context, content)
@@ -76,15 +100,17 @@ class ChatRepositoryImpl(
             }
             Log.d("AIC", "SSE stream ended, fullResponse length=${fullResponse.length}")
 
-            // 4. Save assistant message
-            val emotion = detectEmotion(fullResponse)
-            val assistantMsg = Message(
-                id = newId(), conversationId = conversationId,
-                role = "assistant", content = fullResponse,
-                emotion = emotion, createdAt = now()
-            )
-            messageDao.insert(assistantMsg.toEntity())
-            conversationDao.updateLastMessageTime(conversationId, now())
+            // 4. Save assistant message (skip for group speaker turns - ViewModel handles it)
+            if (!context.isGroupSpeakerTurn) {
+                val emotion = detectEmotion(fullResponse)
+                val assistantMsg = Message(
+                    id = newId(), conversationId = conversationId,
+                    role = "assistant", content = fullResponse,
+                    emotion = emotion, createdAt = now()
+                )
+                messageDao.insert(assistantMsg.toEntity())
+            }
+            conversationDao.updateLastMessage(conversationId, now(), fullResponse.take(200))
         } catch (e: Exception) {
             Log.e("AIC", "SSE stream exception: ${e.javaClass.simpleName}: ${e.message}", e)
             if (sseClient.isCancelled) {
@@ -106,6 +132,10 @@ class ChatRepositoryImpl(
 
     override suspend fun deleteConversation(conversationId: String) {
         conversationDao.archive(conversationId)
+    }
+
+    override suspend fun hardDeleteConversation(conversationId: String) {
+        conversationDao.hardDelete(conversationId)
     }
 
     override suspend fun getChatContext(conversationId: String): Result<ChatContext> {
@@ -142,16 +172,84 @@ class ChatRepositoryImpl(
         }
         messages.add(mapOf("role" to "system", "content" to systemContent))
 
+        // Waifu mode: instruct AI to avoid action descriptions, let stickers handle emotions
+        if (persona.waifuMode) {
+            messages.add(mapOf("role" to "system", "content" to
+                "【Waifu模式】不要使用动作描写或括号心理活动（如 *微笑*、（脸红）、【叹气】）。" +
+                "用自然的对话表达情绪。每句话保持简短，像真人发消息一样。可以适当使用emoji但不要过多。"))
+        }
+
+        // If the AI initiated this conversation (proactive message), remind it
+        val lastMsg = context.messages.lastOrNull()
+        if (lastMsg != null && lastMsg.role == "assistant") {
+            messages.add(mapOf("role" to "system", "content" to
+                "注意：你刚才主动给用户发了一条消息，现在用户回复你了。这不是新话题的开始，请自然地接上你刚才说的话，继续聊下去。"))
+        }
+
+        // Group chat: light context only (each speaker gets their own persona card via swap-card)
+        if (context.groupPersonas.isNotEmpty()) {
+            val otherNames = context.groupPersonas.joinToString("、") { it.name }
+            messages.add(mapOf("role" to "system", "content" to
+                "你正在一个群聊中发言。群里还有：$otherNames。只以你的角色身份说话，不要替其他人发言。"))
+        }
+
         // Inject relevant memories
         if (context.memories.isNotEmpty()) {
             val memoryText = context.memories.joinToString("\n") { "- ${it.content}" }
             messages.add(mapOf("role" to "system", "content" to "以下是关于用户的相关记忆:\n$memoryText"))
         }
 
+        // World Book injection — scan recent user messages for keyword matches
+        val worldBookBefore = mutableListOf<String>()
+        val worldBookAfter = mutableListOf<String>()
+        if (context.worldBookEntries.isNotEmpty()) {
+            val recentUserMessages = context.messages.takeLast(10)
+                .filter { it.role == "user" }
+                .joinToString(" ") { it.content }
+                .lowercase()
+
+            val activeEntries = context.worldBookEntries
+                .filter { it.enabled }
+                .sortedByDescending { it.priority }
+
+            for (entry in activeEntries) {
+                val triggered = entry.constant || entry.keywords.any { kw ->
+                    recentUserMessages.contains(kw.lowercase())
+                } || entry.secondaryKeywords.any { sk ->
+                    recentUserMessages.contains(sk.lowercase())
+                }
+                if (!triggered) continue
+
+                val entryText = buildString {
+                    append("【${entry.key}】")
+                    append("\n${entry.content}")
+                }
+                when (entry.position) {
+                    "after" -> worldBookAfter.add(entryText)
+                    else -> worldBookBefore.add(entryText)
+                }
+            }
+        }
+
+        // "before" entries — go before the message history
+        worldBookBefore.forEach { text ->
+            messages.add(mapOf("role" to "system", "content" to text))
+        }
+
         // Recent conversation history (last N messages)
         val recentMessages = context.messages.takeLast(Constants.DEFAULT_CONTEXT_WINDOW * 2)
         recentMessages.forEach { msg ->
             messages.add(mapOf("role" to msg.role, "content" to msg.content))
+        }
+
+        // Author's Note — injected after recent messages, before current user message
+        if (persona.authorsNote.isNotBlank()) {
+            messages.add(mapOf("role" to "system", "content" to "[Author's Note: ${persona.authorsNote}]"))
+        }
+
+        // "after" entries — go after the message history, before current user message
+        worldBookAfter.forEach { text ->
+            messages.add(mapOf("role" to "system", "content" to text))
         }
 
         // Current message

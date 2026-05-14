@@ -11,7 +11,7 @@ object DatabaseFactory {
 
     private const val TAG = "DatabaseFactory"
     // Increment this when schema changes (adding/removing entity columns, new entities, etc.)
-    private const val DB_SCHEMA_VERSION = 3
+    private const val DB_SCHEMA_VERSION = 11
     private const val PREFS_DB_KEY = "db_schema_version"
 
     fun create(context: Context, passphrase: ByteArray): AICompanionDatabase {

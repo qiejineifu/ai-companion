@@ -19,6 +19,7 @@ security-crypto = "1.1.0-alpha06"
 gson = "2.11.0"
 core-ktx = "1.15.0"
 activity-compose = "1.9.3"
+work-manager = "2.10.0"
 
 [libraries]
 # Compose BOM
@@ -36,6 +37,7 @@ compose-icons-extended = { group = "androidx.compose.material", name = "material
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hilt-navigation-compose" }
+hilt-work = { group = "androidx.hilt", name = "hilt-work", version = "1.2.0" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
@@ -75,6 +77,9 @@ security-crypto = { group = "androidx.security", name = "security-crypto", versi
 # Serialization
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version = "1.7.3" }
+
+# WorkManager
+work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work-manager" }
 
 # Core Android
 core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }

@@ -25,5 +25,8 @@ data class MessageEntity(
     val emotion: String? = null,
     val tokenCount: Int = 0,
     val metadataJson: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    val branchParentId: String? = null,
+    val branchIndex: Int = 0,
+    val senderPersonaId: String? = null
 )

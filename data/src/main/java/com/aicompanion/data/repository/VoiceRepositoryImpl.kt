@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import com.aicompanion.core.database.dao.VoiceProfileDao
 import com.aicompanion.data.mapper.toDomain
+import com.aicompanion.data.mapper.toEntity
 import com.aicompanion.domain.model.VoiceProfile
 import com.aicompanion.domain.repository.VoiceRepository
 import kotlinx.coroutines.channels.awaitClose
@@ -30,6 +31,16 @@ class VoiceRepositoryImpl(
     override suspend fun setActive(id: String) {
         dao.deactivateAll()
         dao.setActive(id)
+    }
+
+    override suspend fun createProfile(profile: VoiceProfile) {
+        dao.deactivateAll()
+        dao.insert(profile.toEntity())
+        dao.setActive(profile.id)
+    }
+
+    override suspend fun deleteProfile(id: String) {
+        dao.deleteById(id)
     }
 
     override suspend fun synthesize(text: String, profile: VoiceProfile): ByteArray? {
