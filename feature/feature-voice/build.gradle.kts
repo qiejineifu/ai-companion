@@ -22,6 +22,12 @@ dependencies {
     implementation(project(":core:core-ui"))
     implementation(project(":domain"))
 
+    // sherpa-onnx offline STT (JitPack)
+    implementation("com.github.k2-fsa:sherpa-onnx:v1.12.18")
+
+    // DashScope TTS SDK
+    implementation("com.alibaba:dashscope-sdk-java:2.17.0")
+
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)

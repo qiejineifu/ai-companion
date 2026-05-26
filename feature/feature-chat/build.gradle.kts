@@ -24,6 +24,7 @@ dependencies {
     implementation(project(":domain"))
     implementation(project(":feature:feature-memory"))
     implementation(project(":feature:feature-voice"))
+    implementation(project(":feature:feature-live2d"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)

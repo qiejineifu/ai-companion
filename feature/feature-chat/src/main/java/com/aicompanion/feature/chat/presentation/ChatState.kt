@@ -2,6 +2,8 @@ package com.aicompanion.feature.chat.presentation
 
 import com.aicompanion.core.common.Emotion
 import com.aicompanion.domain.model.*
+import com.aicompanion.feature.live2d.Live2DModel
+import com.aicompanion.feature.live2d.Live2DManager
 
 data class ChatUiState(
     val conversations: List<Conversation> = emptyList(),
@@ -22,10 +24,13 @@ data class ChatUiState(
     val currentStickerUri: String? = null,
     val branchSelections: Map<String, Int> = emptyMap(),
     val pendingConversationId: String? = null,
+    val replyTarget: MessageUi? = null,
     // Group chat round-robin state
     val groupSpeakingQueue: List<String> = emptyList(),
     val currentSpeakerPersonaId: String? = null,
-    val groupRoundIndex: Int = 0
+    val groupRoundIndex: Int = 0,
+    val callMode: Boolean = false,
+    val live2DModel: Live2DModel? = null
 )
 
 sealed class StreamState {
@@ -47,11 +52,14 @@ sealed class ChatIntent {
     data class StartGroupChat(val personaIds: List<String>, val conversationId: String = com.aicompanion.core.common.newId()) : ChatIntent()
     data class SelectPersona(val personaId: String) : ChatIntent()
     object ToggleVoiceMode : ChatIntent()
+    object ToggleCallMode : ChatIntent()
     data class Regenerate(val messageId: String) : ChatIntent()
     data class SwitchBranch(val branchKey: String, val index: Int) : ChatIntent()
     object ToggleSidebar : ChatIntent()
     data class UpdateInput(val text: String) : ChatIntent()
     object DismissError : ChatIntent()
+    data class StartReply(val messageId: String) : ChatIntent()
+    object CancelReply : ChatIntent()
 }
 
 data class MessageUi(
@@ -65,7 +73,8 @@ data class MessageUi(
     val branchIndex: Int = 0,
     val senderPersonaId: String? = null,
     val senderPersonaName: String? = null,
-    val senderAvatarUri: String? = null
+    val senderAvatarUri: String? = null,
+    val stickerUri: String? = null
 ) {
     val branchKey: String get() = branchParentId ?: id
 }

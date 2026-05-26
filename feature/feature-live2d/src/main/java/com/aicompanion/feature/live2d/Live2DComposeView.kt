@@ -1,9 +1,7 @@
 package com.aicompanion.feature.live2d
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,90 +11,71 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.aicompanion.core.common.Emotion
 
+/**
+ * Compose wrapper for Live2D Cubism rendering via AndroidView + GLSurfaceView.
+ */
 @Composable
 fun Live2DComposeView(
-    manager: Live2DManager,
+    model: Live2DModel?,
+    emotion: Emotion = Emotion.NEUTRAL,
+    isSpeaking: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val state by manager.state.collectAsState()
+    var glView by remember { mutableStateOf<CubismRendererView?>(null) }
 
-    // Idle breathing animation
-    val infiniteTransition = rememberInfiniteTransition()
-    val breathScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f, targetValue = 1.03f,
+    // Mouth animation when speaking
+    val mouthTransition = rememberInfiniteTransition()
+    val mouthOpen by mouthTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = EaseInOutCubic),
+            animation = tween(150),
             repeatMode = RepeatMode.Reverse
         )
     )
 
+    // Update expression and mouth on state change
+    LaunchedEffect(isSpeaking, emotion) {
+        model?.let { m ->
+            if (isSpeaking) {
+                m.setMouthOpen(mouthOpen * 0.6f + 0.2f)
+            } else {
+                m.setMouthOpen(0f)
+            }
+            m.setExpressionByName(emotion.toCubismExpression())
+        }
+    }
+
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(3f / 4f)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF2D2D3A))
-            .pointerInput(Unit) {
-                detectTapGestures { manager.onTap() }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    manager.onDrag(dragAmount.x, dragAmount.y)
+            .pointerInput(model) {
+                detectTapGestures {
+                    model?.setExpressionByName(listOf("happy", "surprise", "shy").random())
                 }
             },
         contentAlignment = Alignment.Center
     ) {
-        if (state.isLoaded) {
-            // Live2D model placeholder - in production replaced by GLSurfaceView
-            Canvas(modifier = Modifier.fillMaxSize(0.6f)) {
-                val w = size.width
-                val h = size.height
-                val cx = w / 2
-                val cy = h / 2
-
-                // Head
-                drawCircle(
-                    color = Color(0xFFFFE0BD),
-                    radius = w * 0.2f * breathScale,
-                    center = Offset(cx, cy - h * 0.1f)
-                )
-                // Hair
-                drawArc(
-                    color = Color(0xFF4A3728),
-                    startAngle = 180f, sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(cx - w * 0.22f, cy - h * 0.28f),
-                    size = Size(w * 0.44f, h * 0.35f),
-                    style = Stroke(width = 2f)
-                )
-                // Eyes
-                drawCircle(Color.Black, radius = 4f, center = Offset(cx - w * 0.06f, cy - h * 0.1f))
-                drawCircle(Color.Black, radius = 4f, center = Offset(cx + w * 0.06f, cy - h * 0.1f))
-                // Mouth
-                drawArc(
-                    color = Color(0xFFE57373),
-                    startAngle = 0f, sweepAngle = 180f,
-                    useCenter = false,
-                    topLeft = Offset(cx - 6f, cy - h * 0.02f),
-                    size = Size(12f, 8f)
-                )
-            }
-
-            // Emotion indicator
-            if (state.currentEmotion != com.aicompanion.core.common.Emotion.NEUTRAL) {
-                Text(
-                    state.currentEmotion.emoji,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-                )
-            }
+        if (model != null) {
+            AndroidView(
+                factory = { ctx ->
+                    CubismRendererView(ctx).also { view ->
+                        view.setModel(model)
+                        glView = view
+                    }
+                },
+                update = { view ->
+                    if (view.getCubismModel() !== model) {
+                        view.setModel(model)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("😊", style = MaterialTheme.typography.displayMedium)
@@ -104,15 +83,19 @@ fun Live2DComposeView(
                     color = Color.White.copy(alpha = 0.6f))
             }
         }
-
-        // Motion indicator
-        if (state.isPlayingMotion) {
-            Text(
-                text = "▶ ${state.motionName ?: ""}",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.5f),
-                modifier = Modifier.align(Alignment.BottomCenter).padding(4.dp)
-            )
-        }
     }
+
+    DisposableEffect(Unit) {
+        onDispose { glView?.cleanup() }
+    }
+}
+
+private fun Emotion.toCubismExpression(): String = when (this) {
+    Emotion.HAPPY -> "happy"
+    Emotion.SAD -> "sad"
+    Emotion.ANGRY -> "angry"
+    Emotion.SURPRISED -> "surprise"
+    Emotion.SHY -> "shy"
+    Emotion.THINKING -> "neutral"
+    Emotion.NEUTRAL -> "neutral"
 }

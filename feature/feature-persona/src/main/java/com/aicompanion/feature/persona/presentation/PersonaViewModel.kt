@@ -13,8 +13,10 @@ import com.aicompanion.domain.model.Persona
 import com.aicompanion.domain.model.Trait
 import com.aicompanion.domain.repository.PersonaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class PersonaUiState(
@@ -31,7 +33,8 @@ data class PersonaUiState(
 
 @HiltViewModel
 class PersonaViewModel @Inject constructor(
-    private val repository: PersonaRepository
+    private val repository: PersonaRepository,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PersonaUiState())
@@ -42,6 +45,14 @@ class PersonaViewModel @Inject constructor(
             repository.createPresetTemplates()
             repository.getAll().collect { personas ->
                 _state.update { it.copy(personas = personas) }
+            }
+        }
+    }
+
+    fun createPersona(persona: Persona) {
+        viewModelScope.launch {
+            repository.create(persona).onSuccess {
+                _state.update { it.copy(importMessage = "角色「${persona.name}」已创建！") }
             }
         }
     }
@@ -190,6 +201,43 @@ class PersonaViewModel @Inject constructor(
                 createdAt = now()
             )
 
+            repository.create(persona).onSuccess {
+                _state.update { it.copy(isLoading = false, importMessage = "成功导入: ${parsed.name}") }
+            }
+            _state.update { it.copy(isLoading = false) }
+        }
+    }
+
+    fun importParsedCard(parsed: TavernCardParser.ParsedCard, imageBytes: ByteArray? = null) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, importMessage = null) }
+
+            // Save PNG as persona avatar
+            var avatarUri: String? = null
+            if (imageBytes != null) {
+                try {
+                    val dir = File(appContext.filesDir, "persona_avatars")
+                    dir.mkdirs()
+                    val file = File(dir, "${newId()}.png")
+                    file.writeBytes(imageBytes)
+                    avatarUri = file.toURI().toString()
+                } catch (_: Exception) {}
+            }
+
+            val persona = Persona(
+                id = newId(), name = parsed.name, description = parsed.description,
+                systemPrompt = parsed.systemPrompt.ifBlank {
+                    parsed.personality.ifBlank { "你是${parsed.name}。" }
+                },
+                scenario = parsed.scenario,
+                firstMessage = parsed.firstMessage,
+                exampleChats = parsed.exampleChats,
+                tags = parsed.tags,
+                specVersion = parsed.specVersion,
+                creator = parsed.creator,
+                avatarImageUri = avatarUri,
+                createdAt = now()
+            )
             repository.create(persona).onSuccess {
                 _state.update { it.copy(isLoading = false, importMessage = "成功导入: ${parsed.name}") }
             }

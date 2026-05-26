@@ -1,129 +1,121 @@
 package com.aicompanion.feature.voice
 
 import android.content.Context
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import com.aicompanion.core.common.Result
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
 
-/**
- * Sherpa-ONNX offline STT engine wrapper.
- * Phase 3: Requires sherpa-onnx AAR.
- * Models: Zipformer-ZH / SenseVoice-ZH ~80-120MB.
- */
-class SherpaOnnxSTT(private val context: Context) {
+@Singleton
+class SherpaOnnxSTT @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private var recognizer: OfflineRecognizer? = null
+    private var audioRecord: AudioRecord? = null
+    @Volatile private var isListening = false
 
-    data class ModelInfo(
-        val name: String,
-        val language: String,
-        val type: String,
-        val sizeMB: Int,
-        val url: String
-    )
-
-    companion object {
-        val AVAILABLE_MODELS = listOf(
-            ModelInfo("Zipformer 中文", "zh-CN", "zipformer", 85, "sherpa-onnx-zipformer-zh"),
-            ModelInfo("SenseVoice 中文", "zh-CN", "sense_voice", 95, "sherpa-onnx-sense-voice-zh"),
-            ModelInfo("Paraformer 中文", "zh-CN", "paraformer", 78, "sherpa-onnx-paraformer-zh"),
-        )
-    }
-
-    private var isInitialized = false
-    private var isListening = false
-    private val modelDir: File
-
-    init {
-        modelDir = File(context.filesDir, "sherpa_models/stt")
-        modelDir.mkdirs()
-    }
-
-    suspend fun initialize(modelName: String = "sherpa-onnx-zipformer-zh"): Result<Boolean> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val modelDir = File(modelDir, modelName)
-                val encoder = File(modelDir, "encoder.onnx")
-                val decoder = File(modelDir, "decoder.onnx")
-                val joiner = File(modelDir, "joiner.onnx")
-                val tokens = File(modelDir, "tokens.txt")
-
-                if (!encoder.exists() || !decoder.exists() || !tokens.exists()) {
-                    return@withContext Result.Error("STT 模型文件未下载")
-                }
-
-                // In production: init SherpaOnnxRecognizer
-                // val config = OnlineRecognizerConfig(
-                //     model = OnlineTransducerModelConfig(
-                //         encoder = encoder.absolutePath,
-                //         decoder = decoder.absolutePath,
-                //         joiner = joiner.absolutePath,
-                //     ),
-                //     tokens = tokens.absolutePath,
-                // )
-                // recognizer = OnlineRecognizer(config)
-
-                isInitialized = true
-                Result.Success(true)
-            } catch (e: Exception) {
-                Result.Error("初始化离线 STT 失败: ${e.message}", e)
-            }
+    suspend fun initialize(): Result<Boolean> = withContext(Dispatchers.IO) {
+        if (recognizer != null) return@withContext Result.Success(true)
+        try {
+            val config = OfflineRecognizerConfig(
+                modelConfig = OfflineModelConfig(
+                    paraformer = OfflineParaformerModelConfig(
+                        model = "sherpa_models/stt/model.int8.onnx"
+                    ),
+                    tokens = "sherpa_models/stt/tokens.txt",
+                    numThreads = 1,
+                )
+            )
+            recognizer = OfflineRecognizer(context.assets, config)
+            Result.Success(true)
+        } catch (e: Exception) {
+            Result.Error("STT初始化失败: ${e.message}", e)
         }
     }
 
     fun startStreaming(): Flow<STTResult> = flow {
-        if (!isInitialized) {
-            emit(STTResult.Error("STT 引擎未初始化"))
+        val rec = recognizer ?: run {
+            emit(STTResult.Error("识别器未初始化"))
             return@flow
         }
+        val sampleRate = 16000
+        val bufferSize = AudioRecord.getMinBufferSize(
+            sampleRate,
+            android.media.AudioFormat.CHANNEL_IN_MONO,
+            android.media.AudioFormat.ENCODING_PCM_16BIT
+        ).coerceAtLeast(4096)
 
-        isListening = true
+        val allSamples = mutableListOf<Float>()
+        val buffer = ShortArray(bufferSize)
+        val maxSamples = sampleRate * 15
 
-        // In production: audio recording loop + streaming recognition
-        // recognizer.createStream()
-        // audioRecord.startRecording()
-        // while (isListening) {
-        //     audioRecord.read(buffer)
-        //     recognizer.acceptWaveform(samples)
-        //     while (recognizer.isReady()) recognizer.decode()
-        //     emit(STTResult.Partial(recognizer.getResult()))
-        // }
-
-        // Placeholder
-        while (isListening) {
-            kotlinx.coroutines.delay(100)
-        }
-    }
-
-    fun stop() {
-        isListening = false
-    }
-
-    suspend fun downloadModel(modelInfo: ModelInfo, onProgress: (Float) -> Unit): Result<Boolean> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val dir = File(modelDir, modelInfo.name)
-                dir.mkdirs()
-                onProgress(0.3f)
-                kotlinx.coroutines.delay(300)
-                onProgress(0.7f)
-                kotlinx.coroutines.delay(300)
-                onProgress(1.0f)
-                Result.Success(true)
-            } catch (e: Exception) {
-                Result.Error("STT 模型下载失败: ${e.message}", e)
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC, sampleRate,
+                android.media.AudioFormat.CHANNEL_IN_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize * 2
+            )
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                emit(STTResult.Error("麦克风不可用"))
+                return@flow
             }
+            audioRecord?.startRecording()
+            isListening = true
+
+            while (isListening) {
+                val read = audioRecord?.read(buffer, 0, bufferSize) ?: break
+                if (read <= 0) continue
+                for (i in 0 until read) allSamples.add(buffer[i].toFloat() / 32768f)
+
+                if (allSamples.size >= sampleRate) {
+                    val s = rec.createStream()
+                    s.acceptWaveform(allSamples.toFloatArray(), sampleRate)
+                    rec.decode(s)
+                    val t = rec.getResult(s).text
+                    s.release()
+                    if (t.isNotBlank()) emit(STTResult.Partial(t))
+                }
+                if (allSamples.size >= maxSamples) break
+            }
+
+            if (allSamples.isNotEmpty()) {
+                val s = rec.createStream()
+                s.acceptWaveform(allSamples.toFloatArray(), sampleRate)
+                rec.decode(s)
+                val t = rec.getResult(s).text
+                s.release()
+                if (t.isNotBlank()) emit(STTResult.Final(t))
+            }
+        } catch (e: SecurityException) {
+            emit(STTResult.Error("缺少录音权限"))
+        } catch (e: Exception) {
+            emit(STTResult.Error("录音错误: ${e.message}"))
+        } finally {
+            audioRecord?.stop()
+            audioRecord?.release()
+            audioRecord = null
+            isListening = false
         }
     }
 
-    fun isModelDownloaded(modelName: String): Boolean {
-        return File(modelDir, "$modelName/encoder.onnx").exists()
-    }
-
+    fun stop() { isListening = false }
     fun release() {
         isListening = false
-        isInitialized = false
+        audioRecord?.release()
+        audioRecord = null
+        recognizer?.release()
+        recognizer = null
     }
 }
 

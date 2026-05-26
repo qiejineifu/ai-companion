@@ -50,7 +50,9 @@ fun PersonaSettingsScreen(
     onBack: () -> Unit,
     onEditPersona: () -> Unit,
     onManageStickers: () -> Unit,
-    onManageWorldBook: () -> Unit = {}
+    onManageWorldBook: () -> Unit = {},
+    onManageMoments: () -> Unit = {},
+    onManageExperiences: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var avatarUri by remember { mutableStateOf(persona.avatarImageUri) }
@@ -120,24 +122,29 @@ fun PersonaSettingsScreen(
 
             // Voice
             item { SectionHeader("音色设置") }
-            if (voiceProfiles.isEmpty()) {
-                item { SettingsItem("尚未配置音色", "前往语音设置添加", Icons.Default.RecordVoiceOver) {} }
-            } else {
-                items(voiceProfiles) { vp ->
-                    val isSelected = vp.id == persona.voiceProfileId
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clickable { onUpdatePersona(persona.copy(voiceProfileId = if (isSelected) null else vp.id)) },
-                        colors = CardDefaults.cardColors(containerColor = if (isSelected) Pink50 else Color.White)
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.RecordVoiceOver, null, tint = if (isSelected) Pink500 else TextGray)
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(vp.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = TextDark)
-                                Text("引擎: ${vp.engineType}", color = TextGray, fontSize = 13.sp)
-                            }
-                            if (isSelected) Icon(Icons.Default.Check, null, tint = Pink500)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.RecordVoiceOver, null, tint = Pink500, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("VITS 离线音色 · 编号 ${persona.voiceSid}",
+                                fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = TextDark)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("0", fontSize = 12.sp, color = TextGray)
+                            Slider(
+                                value = persona.voiceSid.toFloat(),
+                                onValueChange = { onUpdatePersona(persona.copy(voiceSid = it.toInt())) },
+                                valueRange = 0f..173f, steps = 172,
+                                modifier = Modifier.weight(1f),
+                                colors = SliderDefaults.colors(thumbColor = Pink500, activeTrackColor = Pink500)
+                            )
+                            Text("173", fontSize = 12.sp, color = TextGray)
                         }
                     }
                 }
@@ -150,19 +157,92 @@ fun PersonaSettingsScreen(
             } else {
                 items(apiProviders) { provider ->
                     val isSelected = provider.id == persona.apiProviderId
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clickable { onUpdatePersona(persona.copy(apiProviderId = if (isSelected) null else provider.id)) },
-                        colors = CardDefaults.cardColors(containerColor = if (isSelected) Pink50 else Color.White)
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Api, null, tint = if (isSelected) Pink500 else TextGray)
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(provider.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = TextDark)
-                                Text(provider.modelName, color = TextGray, fontSize = 13.sp)
+                    var modelExpanded by remember { mutableStateOf(false) }
+                    var showCustomDialog by remember { mutableStateOf(false) }
+                    val models = knownModels(provider.providerTemplate) + provider.modelName
+                    val currentModel = persona.modelName ?: provider.modelName
+
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        // Provider card — click to select
+                        Card(
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable { onUpdatePersona(persona.copy(apiProviderId = if (isSelected) null else provider.id)) },
+                            colors = CardDefaults.cardColors(containerColor = if (isSelected) Pink50 else Color.White)
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Api, null, tint = if (isSelected) Pink500 else TextGray)
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(provider.name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = TextDark)
+                                    Text(currentModel, color = TextGray, fontSize = 13.sp)
+                                }
+                                if (isSelected) Icon(Icons.Default.Check, null, tint = Pink500)
                             }
-                            if (isSelected) Icon(Icons.Default.Check, null, tint = Pink500)
+                        }
+                        // Model dropdown — shown only when this provider is selected
+                        if (isSelected) {
+                            Spacer(Modifier.height(6.dp))
+                            Box {
+                                OutlinedCard(
+                                    modifier = Modifier.fillMaxWidth().clickable { modelExpanded = true },
+                                    colors = CardDefaults.outlinedCardColors(containerColor = Pink50)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Dns, null, tint = Pink500, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("模型: $currentModel", modifier = Modifier.weight(1f), color = TextDark, fontSize = 14.sp)
+                                        Icon(Icons.Default.ArrowDropDown, null, tint = TextGray)
+                                    }
+                                }
+                                DropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
+                                    models.distinct().forEach { model ->
+                                        DropdownMenuItem(
+                                            text = { Text(model, fontSize = 14.sp) },
+                                            onClick = {
+                                                modelExpanded = false
+                                                val override = if (model == provider.modelName) null else model
+                                                onUpdatePersona(persona.copy(modelName = override))
+                                            },
+                                            trailingIcon = {
+                                                if (model == currentModel) Icon(Icons.Default.Check, null, tint = Pink500)
+                                            }
+                                        )
+                                    }
+                                    HorizontalDivider(color = DividerPink)
+                                    DropdownMenuItem(
+                                        text = { Text("+ 自定义模型…", color = Pink500, fontSize = 14.sp) },
+                                        onClick = { modelExpanded = false; showCustomDialog = true },
+                                        leadingIcon = { Icon(Icons.Default.Edit, null, tint = Pink500) }
+                                    )
+                                }
+                            }
+                            if (showCustomDialog) {
+                                var customText by remember { mutableStateOf("") }
+                                AlertDialog(
+                                    onDismissRequest = { showCustomDialog = false },
+                                    title = { Text("自定义模型名称") },
+                                    text = {
+                                        OutlinedTextField(
+                                            value = customText,
+                                            onValueChange = { customText = it },
+                                            singleLine = true,
+                                            placeholder = { Text("输入模型名称，如 deepseek-v4-flash") }
+                                        )
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            showCustomDialog = false
+                                            if (customText.isNotBlank()) {
+                                                onUpdatePersona(persona.copy(modelName = customText))
+                                            }
+                                        }) { Text("确定") }
+                                    },
+                                    dismissButton = { TextButton(onClick = { showCustomDialog = false }) { Text("取消") } }
+                                )
+                            }
                         }
                     }
                 }
@@ -194,9 +274,77 @@ fun PersonaSettingsScreen(
                         }
                         Switch(
                             checked = persona.waifuMode,
-                            onCheckedChange = { onUpdatePersona(persona.copy(waifuMode = it)) },
+                            onCheckedChange = {
+                                onUpdatePersona(persona.copy(
+                                    waifuMode = it,
+                                    chuanYueMode = if (it) false else persona.chuanYueMode
+                                ))
+                            },
                             colors = SwitchDefaults.colors(checkedThumbColor = Pink500, checkedTrackColor = Pink100)
                         )
+                    }
+                }
+            }
+
+            // 穿越 Mode
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Explore, null, tint = Purple400, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("穿越模式", fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = TextDark)
+                            Text("沉浸式叙事互动，允许动作描写和场景交互。与 Waifu 模式互斥",
+                                fontSize = 12.sp, color = TextGray)
+                        }
+                        Switch(
+                            checked = persona.chuanYueMode,
+                            onCheckedChange = {
+                                onUpdatePersona(persona.copy(
+                                    chuanYueMode = it,
+                                    waifuMode = if (it) false else persona.waifuMode
+                                ))
+                            },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Purple400, checkedTrackColor = Purple100)
+                        )
+                    }
+                }
+            }
+
+            // Appearance description for image generation
+            item { SectionHeader("外貌描述") }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("用于 AI 生图的人物外貌",
+                            fontSize = 13.sp, color = TextGray)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = persona.appearanceDesc,
+                            onValueChange = { onUpdatePersona(persona.copy(appearanceDesc = it)) },
+                            label = { Text("外貌描述") },
+                            placeholder = { Text("黑色长发，棕色眼睛，身高165cm，常穿白色连衣裙...") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("朋友圈配图", modifier = Modifier.weight(1f), fontSize = 14.sp, color = TextDark)
+                            Switch(
+                                checked = persona.imageGenEnabled,
+                                onCheckedChange = { onUpdatePersona(persona.copy(imageGenEnabled = it)) },
+                                colors = SwitchDefaults.colors(checkedThumbColor = Pink500, checkedTrackColor = Pink100)
+                            )
+                        }
                     }
                 }
             }
@@ -205,6 +353,34 @@ fun PersonaSettingsScreen(
             item { SectionHeader("世界书") }
             item {
                 SettingsItem("世界书管理", "添加世界观设定，触发关键词后自动注入上下文", Icons.Default.MenuBook, onClick = onManageWorldBook)
+            }
+
+            // Moments (朋友圈)
+            item { SectionHeader("朋友圈") }
+            item {
+                val count = persona.moments.size
+                val status = if (persona.momentsEnabled) {
+                    if (persona.momentsRandomMode) "${persona.momentsRandomMinMinutes}-${persona.momentsRandomMaxMinutes}分钟随机"
+                    else "每${persona.momentsIntervalMinutes}分钟"
+                } else "已关闭"
+                SettingsItem(
+                    "朋友圈动态", "${if (count > 0) "$count 条 · " else ""}$status",
+                    Icons.Default.CameraAlt, onClick = onManageMoments
+                )
+            }
+
+            // Experiences (最近经历)
+            item { SectionHeader("最近经历") }
+            item {
+                val count = persona.experiences.size
+                val status = if (persona.experiencesEnabled) {
+                    if (persona.experiencesRandomMode) "${persona.experiencesRandomMinMinutes / 60}-${persona.experiencesRandomMaxMinutes / 60}小时随机"
+                    else "每${persona.experiencesIntervalMinutes / 60}小时"
+                } else "已关闭"
+                SettingsItem(
+                    "最近经历", "${if (count > 0) "$count 篇 · " else ""}$status",
+                    Icons.Default.AutoStories, onClick = onManageExperiences
+                )
             }
 
             // Author's Note
@@ -268,6 +444,14 @@ fun PersonaSettingsScreen(
             }
         }
     }
+}
+
+private fun knownModels(providerTemplate: String): List<String> = when (providerTemplate) {
+    "openai" -> listOf("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini")
+    "deepseek" -> listOf("deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash")
+    "qwen" -> listOf("qwen-plus", "qwen-max", "qwen-turbo", "qwen-long")
+    "siliconflow" -> listOf("deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct")
+    else -> emptyList()
 }
 
 @Composable

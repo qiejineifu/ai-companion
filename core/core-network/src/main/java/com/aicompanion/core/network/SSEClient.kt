@@ -90,7 +90,7 @@ class SSEClient(private val httpClient: HttpClient) {
                             ?.jsonPrimitive
                             ?.content
 
-                        if (!content.isNullOrEmpty()) {
+                        if (!content.isNullOrEmpty() && content != "null") {
                             chunkCount++
                             buffer.append(content)
                             emit(buffer.toString())

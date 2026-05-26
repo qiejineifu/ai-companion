@@ -6,12 +6,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -23,22 +26,57 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.aicompanion.core.ui.theme.*
+import java.util.*
+import java.util.concurrent.TimeUnit
+
+// === Colors ===
+private val BgStart = Color(0xFFFFF0F3)
+private val BgEnd = Color(0xFFFFF8F9)
+private val AccentPink = Color(0xFFFF6B9B)
+private val TextDark = Color(0xFF2D1B2E)
+private val TextMid = Color(0xFF6B5B6E)
+private val TextLight = Color(0xFFB0A0B0)
+private val ChipBg = Color(0x1AFF6B9B)
+private val OnlineGreen = Color(0xFF6BD4A0)
+
+private val statusList = listOf(
+    "💭 胡思乱想中", "📚 学习中", "😴 发呆中", "😢 emo中",
+    "🎵 听歌中", "🚶 散步中", "📖 阅读中", "🎮 游戏中",
+    "☕ 摸鱼中", "💪 运动打卡", "🎬 追剧中", "🍜 干饭中",
+    "🌈 元气满满", "🌙 想睡觉", "💼 忙碌中", "🌸 赏花中"
+)
+
+private fun getDailyStatus(personaId: String): String {
+    val dayOfYear = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+    val idx = (personaId.hashCode() + dayOfYear).mod(statusList.size).let { if (it < 0) it + statusList.size else it }
+    return statusList[idx]
+}
+
+// === Category filter values ===
+private val categories = listOf("全部", "恋人", "知己", "闺蜜", "学长", "妹妹", "青梅", "同事", "网友", "朋友")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PersonaScreen(
     viewModel: PersonaViewModel,
     onBack: () -> Unit,
-    onSelectPersona: (String) -> Unit = {}
+    onSelectPersona: (String) -> Unit = {},
+    onNavigateToMarket: () -> Unit = {},
+    onNavigateToGuidedBuilder: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    var selectedCategory by remember { mutableStateOf("全部") }
+    var isGridView by remember { mutableStateOf(true) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -51,109 +89,337 @@ fun PersonaScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(ChatBg)) {
-        // Top bar with pink gradient
+    val allPersonas = state.personas
+    val filtered = if (selectedCategory == "全部") allPersonas
+    else allPersonas.filter { it.relationshipType == selectedCategory }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(BgStart, BgEnd)))
+    ) {
+        // === Top nav bar ===
         Row(
-            modifier = Modifier.fillMaxWidth()
-                .background(Brush.horizontalGradient(topBarGradient))
-                .statusBarsPadding().padding(horizontal = 4.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "返回", tint = Color.White) }
-            Text("人设管理", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                modifier = Modifier.weight(1f))
-            IconButton(onClick = { importLauncher.launch("image/*") }) {
-                Icon(Icons.Default.FileUpload, "导入角色卡", tint = Color.White)
+            // Back
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, "返回", tint = TextDark, modifier = Modifier.size(22.dp))
             }
-            IconButton(onClick = { viewModel.showCreateDialog() }) {
-                Icon(Icons.Default.Add, "创建", tint = Color.White)
+            Spacer(Modifier.width(2.dp))
+
+            // Title area
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("角色宇宙", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TextDark)
+                    Text(" ✨✨", fontSize = 13.sp)
+                }
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(color = TextLight)) { append("你已拥有 ") }
+                        withStyle(SpanStyle(color = AccentPink, fontWeight = FontWeight.Bold)) {
+                            append("${allPersonas.size}")
+                        }
+                        withStyle(SpanStyle(color = TextLight)) { append(" 位陪伴角色") }
+                    },
+                    fontSize = 13.sp
+                )
+            }
+
+            // Market icon
+            IconButton(onClick = onNavigateToMarket, modifier = Modifier.size(38.dp)) {
+                Text("🏪", fontSize = 20.sp)
+            }
+            // Bunny icon (import tavern card)
+            IconButton(onClick = { importLauncher.launch("image/*") }, modifier = Modifier.size(38.dp)) {
+                Text("🐰", fontSize = 20.sp)
+            }
+            // + Create button
+            Button(
+                onClick = { viewModel.showCreateDialog() },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentPink),
+                shape = RoundedCornerShape(20.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("创建角色", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+
+            // Guided builder button
+            IconButton(onClick = onNavigateToGuidedBuilder, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.AutoAwesome, "引导创建", tint = AccentPink, modifier = Modifier.size(20.dp))
             }
         }
 
-        LazyColumn(contentPadding = PaddingValues(bottom = 80.dp)) {
-            item {
-                SectionHeader("预设模板", Icons.Default.Star)
+        // === Category chips ===
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Show only categories that have personas or are "全部"
+            val activeCategories = categories.filter { cat ->
+                cat == "全部" || allPersonas.any { it.relationshipType == cat }
             }
-            items(state.personas.filter { it.isPreset }, key = { it.id }) { persona ->
-                PersonaCard(
-                    persona = persona,
-                    onSelect = { onSelectPersona(persona.id) },
-                    onEdit = { viewModel.showEditDialog(persona) },
-                    onDuplicate = { viewModel.duplicatePersona(persona) }
-                )
-            }
-            item {
-                SectionHeader("自定义人设", Icons.Default.Face)
-            }
-            if (state.personas.none { !it.isPreset }) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("点击右上角 + 创建自定义角色", color = TextGray, fontSize = 14.sp)
-                    }
+
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(activeCategories.size) { index ->
+                    val cat = activeCategories[index]
+                    val selected = cat == selectedCategory
+                    FilterChip(
+                        selected = selected,
+                        onClick = { selectedCategory = cat },
+                        label = {
+                            Text(
+                                cat,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) Color.White else TextDark
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AccentPink,
+                            containerColor = Color.White.copy(alpha = 0.6f)
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        border = null
+                    )
                 }
             }
-            items(state.personas.filter { !it.isPreset }, key = { it.id }) { persona ->
-                PersonaCard(
-                    persona = persona,
-                    onSelect = { onSelectPersona(persona.id) },
-                    onEdit = { viewModel.showEditDialog(persona) },
-                    onDuplicate = { viewModel.duplicatePersona(persona) },
-                    onDelete = { viewModel.deletePersona(persona.id) }
+
+            // Grid/list toggle
+            IconButton(onClick = { isGridView = !isGridView }, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    if (isGridView) Icons.Default.GridView else Icons.Default.ViewList,
+                    "切换视图", tint = TextLight, modifier = Modifier.size(20.dp)
                 )
             }
         }
 
-        if (state.showEditDialog && state.editingPersona != null) {
-            PersonaEditDialog(
-                persona = state.editingPersona!!,
-                onPersonaChange = { viewModel.updateEditingPersona(it) },
-                onSave = { viewModel.savePersona() },
-                onDismiss = { viewModel.dismissDialog() },
-                newTraitKey = state.newTraitKey,
-                newTraitValue = state.newTraitValue,
-                onTraitKeyChange = { viewModel.setTraitKey(it) },
-                onTraitValueChange = { viewModel.setTraitValue(it) },
-                onAddTrait = { viewModel.addTrait() },
-                onRemoveTrait = { viewModel.removeTrait(it) },
-                newExampleChat = state.newExampleChat,
-                newTag = state.newTag,
-                onNewExampleChatChange = { viewModel.setNewExampleChat(it) },
-                onAddExampleChat = { viewModel.addExampleChat() },
-                onRemoveExampleChat = { viewModel.removeExampleChat(it) },
-                onNewTagChange = { viewModel.setNewTag(it) },
-                onAddTag = { viewModel.addTag() },
-                onRemoveTag = { viewModel.removeTag(it) }
+        Spacer(Modifier.height(8.dp))
+
+        // === Persona grid/list ===
+        if (filtered.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🐰", fontSize = 48.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("还没有角色", color = TextLight, fontSize = 15.sp)
+                    Text("点击右上角「创建角色」开始吧", color = TextLight, fontSize = 13.sp)
+                }
+            }
+        } else if (isGridView) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filtered, key = { it.id }) { persona ->
+                    PersonaGridCard(
+                        persona = persona,
+                        onClick = { onSelectPersona(persona.id) },
+                        onEdit = { viewModel.showEditDialog(persona) }
+                    )
+                }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filtered.size, key = { filtered[it].id }) { index ->
+                    val persona = filtered[index]
+                    PersonaListCard(
+                        persona = persona,
+                        onClick = { onSelectPersona(persona.id) },
+                        onEdit = { viewModel.showEditDialog(persona) },
+                        onDuplicate = { viewModel.duplicatePersona(persona) },
+                        onDelete = { viewModel.deletePersona(persona.id) }
+                    )
+                }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        }
+    }
+
+    // === Edit dialog ===
+    if (state.showEditDialog && state.editingPersona != null) {
+        PersonaEditDialog(
+            persona = state.editingPersona!!,
+            onPersonaChange = { viewModel.updateEditingPersona(it) },
+            onSave = { viewModel.savePersona() },
+            onDismiss = { viewModel.dismissDialog() },
+            newTraitKey = state.newTraitKey,
+            newTraitValue = state.newTraitValue,
+            onTraitKeyChange = { viewModel.setTraitKey(it) },
+            onTraitValueChange = { viewModel.setTraitValue(it) },
+            onAddTrait = { viewModel.addTrait() },
+            onRemoveTrait = { viewModel.removeTrait(it) },
+            newExampleChat = state.newExampleChat,
+            newTag = state.newTag,
+            onNewExampleChatChange = { viewModel.setNewExampleChat(it) },
+            onAddExampleChat = { viewModel.addExampleChat() },
+            onRemoveExampleChat = { viewModel.removeExampleChat(it) },
+            onNewTagChange = { viewModel.setNewTag(it) },
+            onAddTag = { viewModel.addTag() },
+            onRemoveTag = { viewModel.removeTag(it) }
+        )
+    }
+}
+
+@Composable
+private fun PersonaGridCard(
+    persona: com.aicompanion.domain.model.Persona,
+    onClick: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val days = computeCompanionDays(persona.createdAt)
+    val tagText = "${persona.speakingStyle} · ${persona.relationshipType}"
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.72f)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Background image
+            if (persona.avatarImageUri != null) {
+                AsyncImage(
+                    model = persona.avatarImageUri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                // Placeholder gradient
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xFFFFE0E8), Color(0xFFFFD0DC))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(persona.name.take(1), fontSize = 48.sp,
+                        color = Color.White.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Gradient overlay (dark at bottom for text readability)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0x00000000),
+                                Color(0x33000000),
+                                Color(0xAA000000)
+                            )
+                        )
+                    )
             )
+
+            // Top-left: daily status badge
+            val dailyStatus = remember(persona.id) { getDailyStatus(persona.id) }
+            Surface(
+                color = Color.White.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .padding(8.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Text(
+                    dailyStatus,
+                    fontSize = 10.sp,
+                    color = TextDark,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            // Top-right: edit button
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier
+                    .size(28.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+            ) {
+                Icon(
+                    Icons.Default.MoreHoriz,
+                    "编辑",
+                    tint = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Bottom area: name + tags + days
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp)
+            ) {
+                Text(
+                    persona.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    tagText,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "我们已相伴 $days 天",
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.65f)
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    Row(
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = Pink500, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Pink500)
-    }
-}
-
-@Composable
-private fun PersonaCard(
+private fun PersonaListCard(
     persona: com.aicompanion.domain.model.Persona,
-    onSelect: () -> Unit = {},
+    onClick: () -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)?
 ) {
+    val days = computeCompanionDays(persona.createdAt)
+
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
@@ -161,78 +427,84 @@ private fun PersonaCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar
+            // Avatar with image or initial
             Box(
-                modifier = Modifier.size(52.dp).clip(CircleShape)
-                    .background(if (persona.avatarImageUri == null) Pink100 else Color.Transparent),
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFFFE0E8)),
                 contentAlignment = Alignment.Center
             ) {
                 if (persona.avatarImageUri != null) {
                     AsyncImage(
-                        model = persona.avatarImageUri, contentDescription = null,
-                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        model = persona.avatarImageUri,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Text(persona.name.take(1), fontSize = 22.sp, color = Pink600, fontWeight = FontWeight.Bold)
+                    Text(
+                        persona.name.take(1),
+                        fontSize = 24.sp,
+                        color = AccentPink.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
+
             Spacer(Modifier.width(12.dp))
 
-            // Info
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(persona.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
-                    if (persona.isPreset) {
-                        Spacer(Modifier.width(6.dp))
-                        Surface(color = Pink100, shape = RoundedCornerShape(4.dp)) {
-                            Text("预设", fontSize = 10.sp, color = Pink500,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp))
-                        }
-                    }
+                    Text(persona.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextDark)
                 }
-                if (persona.description.isNotBlank()) {
-                    Text(persona.description, fontSize = 13.sp, color = TextGray,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(color = Pink50, shape = RoundedCornerShape(4.dp)) {
-                        Text(persona.speakingStyle, fontSize = 11.sp, color = Pink500,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
-                    Surface(color = Purple100, shape = RoundedCornerShape(4.dp)) {
-                        Text(persona.relationshipType, fontSize = 11.sp, color = Purple400,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                    }
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${persona.speakingStyle} · ${persona.relationshipType}",
+                    fontSize = 13.sp,
+                    color = TextMid,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                val dailyStatus = remember(persona.id) { getDailyStatus(persona.id) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "我们已相伴 $days 天",
+                        fontSize = 12.sp,
+                        color = TextLight
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        dailyStatus,
+                        fontSize = 11.sp,
+                        color = AccentPink.copy(alpha = 0.7f)
+                    )
                 }
             }
 
             // Actions
-            FilledTonalButton(
-                onClick = onSelect,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = Pink100,
-                    contentColor = Pink600
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.padding(end = 4.dp)
-            ) { Text("选择", fontSize = 13.sp) }
-            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Edit, "编辑", tint = TextGray, modifier = Modifier.size(18.dp))
+            IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Edit, "编辑", tint = TextLight, modifier = Modifier.size(18.dp))
             }
-            IconButton(onClick = onDuplicate, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ContentCopy, "复制", tint = TextGray, modifier = Modifier.size(18.dp))
+            IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.ContentCopy, "复制", tint = TextLight, modifier = Modifier.size(18.dp))
             }
             if (onDelete != null) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Delete, "删除", tint = Pink400, modifier = Modifier.size(18.dp))
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, "删除", tint = AccentPink.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
                 }
             }
         }
     }
 }
 
+private fun computeCompanionDays(createdAt: Long): Int {
+    val diff = System.currentTimeMillis() - createdAt
+    return (TimeUnit.MILLISECONDS.toDays(diff) + 1).toInt().coerceAtLeast(1)
+}
+
+// === Keeping existing PersonaEditDialog ===
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun PersonaEditDialog(

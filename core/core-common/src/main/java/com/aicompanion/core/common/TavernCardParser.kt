@@ -38,6 +38,11 @@ object TavernCardParser {
         return parseCardJson(jsonString)
     }
 
+    fun parseFromBytes(bytes: ByteArray): ParsedCard? {
+        val jsonString = extractTavernJson(bytes) ?: return null
+        return parseCardJson(jsonString)
+    }
+
     private fun extractTavernJson(bytes: ByteArray): String? {
         val pngSignature = byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10)
         if (bytes.size < 8 || !bytes.take(8).toByteArray().contentEquals(pngSignature)) {

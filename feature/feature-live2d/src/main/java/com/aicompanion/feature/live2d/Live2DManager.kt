@@ -1,18 +1,22 @@
 package com.aicompanion.feature.live2d
 
 import android.content.Context
+import android.util.Log
 import com.aicompanion.core.common.Emotion
 import com.aicompanion.core.common.Result
 import com.aicompanion.domain.model.Live2DModelInfo
 import com.aicompanion.domain.repository.Live2DModelRepository
+import com.live2d.sdk.cubism.framework.CubismFramework
+import com.live2d.sdk.cubism.framework.CubismFrameworkConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "Live2DManager"
 
 data class Live2DState(
     val isLoaded: Boolean = false,
@@ -37,42 +41,101 @@ class Live2DManager @Inject constructor(
     private val _state = MutableStateFlow(Live2DState())
     val state: StateFlow<Live2DState> = _state.asStateFlow()
 
-    private var motionScope: CoroutineScope? = null
-    private var idleLoopJob: Job? = null
+    var activeModel: Live2DModel? = null
+        private set
+
+    private var frameworkInitialized = false
 
     fun initialize() {
+        initFramework()
+        LAppPal.assets = context.assets
         CoroutineScope(Dispatchers.Main).launch {
             val active = repository.getActive()
             if (active != null) {
                 loadModel(active)
             } else {
-                // Try to load built-in model
-                createDefaultModel()
+                loadDefaultModel()
             }
+        }
+    }
+
+    private suspend fun loadDefaultModel() {
+        try {
+            val model = Live2DModel()
+            if (model.loadModelAssets("live2d_models/Haru/", "Haru.model3.json")) {
+                activeModel = model
+                _state.value = _state.value.copy(isLoaded = true)
+                Log.d(TAG, "Default Haru model loaded")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load default model: ${e.message}", e)
+        }
+    }
+
+    private fun initFramework() {
+        if (frameworkInitialized) return
+        try {
+            val option = CubismFramework.Option().apply {
+                loggingLevel = CubismFrameworkConfig.LogLevel.VERBOSE
+            }
+            CubismFramework.cleanUp()
+            CubismFramework.startUp(option)
+            CubismFramework.initialize()
+            frameworkInitialized = true
+            Log.d(TAG, "CubismFramework initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to init CubismFramework: ${e.message}", e)
         }
     }
 
     suspend fun loadModel(modelInfo: Live2DModelInfo): Result<Live2DModelInfo> {
-        return try {
-            // Validate model files
-            val modelJsonFile = File(modelInfo.modelJsonPath)
-            if (!modelJsonFile.exists()) {
-                return Result.Error("模型文件不存在: ${modelInfo.modelJsonPath}")
-            }
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!frameworkInitialized) initFramework()
+                LAppPal.assets = context.assets
 
-            repository.setActive(modelInfo.id)
-            _state.value = _state.value.copy(isLoaded = true, currentModel = modelInfo)
-            startIdleAnimation()
-            Result.Success(modelInfo)
-        } catch (e: Exception) {
-            Result.Error("加载模型失败: ${e.message}", e)
+                // Release previous model
+                activeModel?.releaseModel()
+
+                val modelDir = determineModelDir(modelInfo)
+                val settingName = modelInfo.modelJsonPath
+                    .substringAfterLast('/')
+                    .ifEmpty { "${modelInfo.name}.model3.json" }
+
+                val model = Live2DModel()
+                if (!model.loadModelAssets(modelDir, settingName)) {
+                    return@withContext Result.Error("模型加载失败")
+                }
+
+                activeModel = model
+                repository.setActive(modelInfo.id)
+                _state.value = _state.value.copy(isLoaded = true, currentModel = modelInfo)
+
+                Log.d(TAG, "Model loaded: ${modelInfo.name}")
+                Result.Success(modelInfo)
+            } catch (e: Exception) {
+                Log.e(TAG, "Load model failed: ${e.message}", e)
+                Result.Error("加载模型失败: ${e.message}", e)
+            }
         }
     }
 
-    fun setEmotion(emotion: Emotion) {
-        if (!_state.value.isLoaded) return
+    private fun determineModelDir(modelInfo: Live2DModelInfo): String {
+        val path = modelInfo.modelJsonPath
+        if (path.isNotBlank()) {
+            val normalized = path.trimStart('/')
+            // Remove the file name, keep the directory
+            val lastSlash = normalized.lastIndexOf('/')
+            return if (lastSlash > 0) "${normalized.substring(0, lastSlash + 1)}"
+            else "live2d_models/"
+        }
+        return "live2d_models/${modelInfo.name}/"
+    }
 
+    fun setEmotion(emotion: Emotion) {
         val expression = emotionMapper.getExpression(emotion)
+        activeModel?.setExpressionByName(expression)
+
         val motions = emotionMapper.getMotions(emotion)
         val priority = emotionMapper.getPriority(emotion)
 
@@ -82,30 +145,12 @@ class Live2DManager @Inject constructor(
         )
 
         if (motions.isNotEmpty() && priority > 0) {
-            playMotion(motions.first(), priority)
+            activeModel?.startRandomMotion("idle", priority)
         }
     }
 
-    fun playMotion(motionName: String, priority: Int = 2) {
-        if (!_state.value.isLoaded) return
-
-        _state.value = _state.value.copy(isPlayingMotion = true, motionName = motionName)
-
-        motionScope?.cancel()
-        motionScope = CoroutineScope(Dispatchers.Main)
-
-        // Simulated motion playback - in production this triggers Cubism SDK
-        motionScope?.launch {
-            delay(2000) // Motion duration placeholder
-            _state.value = _state.value.copy(isPlayingMotion = false, motionName = null)
-            startIdleAnimation()
-        }
-    }
-
-    fun stopMotion() {
-        motionScope?.cancel()
-        _state.value = _state.value.copy(isPlayingMotion = false, motionName = null)
-        startIdleAnimation()
+    fun setSpeaking(speaking: Boolean) {
+        _state.value = _state.value.copy(isSpeaking = speaking)
     }
 
     fun updateLipSync(audioFrame: FloatArray) {
@@ -115,6 +160,7 @@ class Live2DManager @Inject constructor(
             mouthForm = params.mouthForm,
             isSpeaking = params.isSpeaking
         )
+        activeModel?.setMouthOpen(params.mouthOpenY)
     }
 
     fun updateLipSyncPCM(pcmFrame: ShortArray) {
@@ -124,36 +170,15 @@ class Live2DManager @Inject constructor(
             mouthForm = params.mouthForm,
             isSpeaking = params.isSpeaking
         )
+        activeModel?.setMouthOpen(params.mouthOpenY)
     }
 
     fun onTap() {
-        val tapEmotions = listOf(Emotion.HAPPY, Emotion.SURPRISED, Emotion.SHY)
-        setEmotion(tapEmotions.random())
+        activeModel?.setExpressionByName(listOf("happy", "surprise", "shy").random())
     }
 
     fun onDrag(dx: Float, dy: Float) {
-        // Head tracking - parameter manipulation
-        if (!_state.value.isLoaded) return
-        // In production: update model parameters for head rotation
-    }
-
-    private fun startIdleAnimation() {
-        idleLoopJob?.cancel()
-        if (_state.value.isPlayingMotion) return
-
-        idleLoopJob = CoroutineScope(Dispatchers.Main).launch {
-            while (isActive) {
-                _state.value = _state.value.copy(currentExpression = "neutral")
-                delay(3000)
-                // Random blink / subtle movement cycle
-            }
-        }
-    }
-
-    private suspend fun createDefaultModel() {
-        // Phase 1: create placeholder for built-in model
-        val modelsDir = File(context.filesDir, "live2d_models")
-        modelsDir.mkdirs()
+        activeModel?.dragTarget?.set(dx * 0.01f, dy * 0.01f)
     }
 
     fun getModels() = repository.getAll()
@@ -167,4 +192,10 @@ class Live2DManager @Inject constructor(
     }
 
     suspend fun deleteModel(id: String) = repository.delete(id)
+
+    fun release() {
+        activeModel?.releaseModel()
+        activeModel = null
+        _state.value = Live2DState()
+    }
 }

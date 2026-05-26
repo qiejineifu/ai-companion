@@ -37,7 +37,8 @@ fun SettingsScreen(
     onNavigateToMemory: (() -> Unit)? = null,
     onNavigateToProactiveMessages: (() -> Unit)? = null,
     onNavigateToVoiceSettings: () -> Unit,
-    onNavigateToVoiceProfiles: (() -> Unit)? = null,
+    onNavigateToImageGen: (() -> Unit)? = null,
+    onNavigateToImageGallery: (() -> Unit)? = null,
     onNavigateToLive2DModels: (() -> Unit)? = null,
     onNavigateToConversations: (() -> Unit)? = null,
     onNavigateToDataExport: (() -> Unit)? = null,
@@ -104,10 +105,12 @@ fun SettingsScreen(
 
             item { SectionTitle("语音设置") }
             item { SettingsItem("语音配置", "TTS 引擎、语速、音调", Icons.Default.Tune, onNavigateToVoiceSettings) }
-            if (onNavigateToVoiceProfiles != null) {
-                item { SettingsItem("音色管理", "选择和切换 AI 音色", Icons.Default.RecordVoiceOver, onNavigateToVoiceProfiles) }
+            if (onNavigateToImageGen != null) {
+                item { SettingsItem("生图设置", "多模态 AI 图片生成配置", Icons.Default.Image, onNavigateToImageGen) }
             }
-
+            if (onNavigateToImageGallery != null) {
+                item { SettingsItem("生成相册", "查看和管理 AI 生成的图片", Icons.Default.Collections, onNavigateToImageGallery) }
+            }
             if (onNavigateToLive2DModels != null) {
                 item { SectionTitle("虚拟形象") }
                 item { SettingsItem("模型管理", "导入和管理 Live2D 模型", Icons.Default.TagFaces, onNavigateToLive2DModels) }

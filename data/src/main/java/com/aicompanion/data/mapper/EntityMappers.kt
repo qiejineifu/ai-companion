@@ -39,6 +39,15 @@ fun PersonaEntity.toDomain(): Persona {
     val tags: List<String> = try {
         gson.fromJson(tagsJson, object : TypeToken<List<String>>() {}.type)
     } catch (_: Exception) { emptyList() }
+    val moments: List<MomentEntry> = try {
+        gson.fromJson(momentsJson, object : TypeToken<List<MomentEntry>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    val experiences: List<ExperienceEntry> = try {
+        gson.fromJson(experiencesJson, object : TypeToken<List<ExperienceEntry>>() {}.type)
+    } catch (_: Exception) { emptyList() }
+    val userProfile: UserProfile? = try {
+        gson.fromJson(userProfileJson, UserProfile::class.java)
+    } catch (_: Exception) { null }
     return Persona(
         id = id, name = name, description = description,
         systemPrompt = systemPrompt, traits = traits,
@@ -48,8 +57,19 @@ fun PersonaEntity.toDomain(): Persona {
         exampleChats = exampleChats, tags = tags,
         specVersion = specVersion, creator = creator,
         voiceProfileId = voiceProfileId, apiProviderId = apiProviderId,
+        modelName = modelName,
         avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
-        authorsNote = authorsNote, waifuMode = waifuMode, isPreset = isPreset, createdAt = createdAt
+        authorsNote = authorsNote, waifuMode = waifuMode, chuanYueMode = chuanYueMode, isPreset = isPreset, createdAt = createdAt,
+        voiceSid = voiceSid,
+        appearanceDesc = appearanceDesc, imageGenEnabled = imageGenEnabled,
+        moments = moments, experiences = experiences,
+        momentsEnabled = momentsEnabled, momentsIntervalMinutes = momentsIntervalMinutes,
+        momentsRandomMode = momentsRandomMode, momentsRandomMinMinutes = momentsRandomMinMinutes,
+        momentsRandomMaxMinutes = momentsRandomMaxMinutes,
+        experiencesEnabled = experiencesEnabled, experiencesIntervalMinutes = experiencesIntervalMinutes,
+        experiencesRandomMode = experiencesRandomMode, experiencesRandomMinMinutes = experiencesRandomMinMinutes,
+        experiencesRandomMaxMinutes = experiencesRandomMaxMinutes,
+        userProfile = userProfile
     )
 }
 
@@ -75,13 +95,15 @@ fun MemoryEntryEntity.toDomain(): MemoryEntry {
 fun VoiceProfileEntity.toDomain() = VoiceProfile(
     id = id, name = name, engineType = engineType,
     voiceId = voiceId, pitch = pitch, speed = speed,
-    isActive = isActive, createdAt = createdAt
+    isActive = isActive, createdAt = createdAt,
+    ttsModel = ttsModel, ttsSid = ttsSid
 )
 
 fun VoiceProfile.toEntity() = VoiceProfileEntity(
     id = id, name = name, engineType = engineType,
     voiceId = voiceId, pitch = pitch, speed = speed,
-    isActive = isActive, createdAt = createdAt
+    isActive = isActive, createdAt = createdAt,
+    ttsModel = ttsModel, ttsSid = ttsSid
 )
 
 fun Live2DModelInfoEntity.toDomain() = Live2DModelInfo(
@@ -100,8 +122,19 @@ fun Persona.toEntity() = PersonaEntity(
     exampleChatsJson = gson.toJson(exampleChats), tagsJson = gson.toJson(tags),
     specVersion = specVersion, creator = creator,
     voiceProfileId = voiceProfileId, apiProviderId = apiProviderId,
+    modelName = modelName,
     avatarImageUri = avatarImageUri, defaultModelPath = defaultModelPath,
-    authorsNote = authorsNote, waifuMode = waifuMode, isPreset = isPreset, createdAt = createdAt
+    authorsNote = authorsNote, waifuMode = waifuMode, chuanYueMode = chuanYueMode, isPreset = isPreset, createdAt = createdAt,
+    voiceSid = voiceSid,
+    appearanceDesc = appearanceDesc, imageGenEnabled = imageGenEnabled,
+    momentsJson = gson.toJson(moments), experiencesJson = gson.toJson(experiences),
+    momentsEnabled = momentsEnabled, momentsIntervalMinutes = momentsIntervalMinutes,
+    momentsRandomMode = momentsRandomMode, momentsRandomMinMinutes = momentsRandomMinMinutes,
+    momentsRandomMaxMinutes = momentsRandomMaxMinutes,
+    experiencesEnabled = experiencesEnabled, experiencesIntervalMinutes = experiencesIntervalMinutes,
+    experiencesRandomMode = experiencesRandomMode, experiencesRandomMinMinutes = experiencesRandomMinMinutes,
+    experiencesRandomMaxMinutes = experiencesRandomMaxMinutes,
+    userProfileJson = gson.toJson(userProfile)
 )
 
 fun ApiProvider.toEntity() = ApiProviderEntity(

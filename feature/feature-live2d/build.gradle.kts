@@ -9,6 +9,11 @@ plugins {
 android {
     namespace = "com.aicompanion.feature.live2d"
     compileSdk = 35
+
+    defaultConfig {
+        minSdk = 26
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -18,6 +23,9 @@ android {
 }
 
 dependencies {
+    // Live2D Cubism Core — compiled here, packaged by :app
+    compileOnly(files("libs/Live2DCubismCore.aar"))
+
     implementation(project(":core:core-common"))
     implementation(project(":core:core-ui"))
     implementation(project(":domain"))

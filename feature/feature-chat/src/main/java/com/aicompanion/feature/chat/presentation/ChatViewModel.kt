@@ -13,9 +13,18 @@ import com.aicompanion.domain.repository.*
 import com.aicompanion.domain.usecase.*
 import com.aicompanion.feature.memory.MemoryExtractor
 import com.aicompanion.feature.voice.STTEvent
+import com.aicompanion.feature.voice.SherpaOnnxSTT
+import com.aicompanion.feature.voice.STTResult
+import android.content.Context
+import com.aicompanion.core.common.UnreadTracker
+import com.aicompanion.feature.live2d.Live2DManager
 import com.aicompanion.feature.voice.STTManager
+import com.aicompanion.feature.voice.TTSManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,11 +38,16 @@ class ChatViewModel @Inject constructor(
     private val stickerRepository: StickerRepository,
     private val worldBookRepository: WorldBookRepository,
     private val sttManager: STTManager,
+    private val onnxSTT: SherpaOnnxSTT,
+    private val ttsManager: TTSManager,
+    private val voiceRepository: VoiceRepository,
     private val sendMessageUseCase: SendMessageUseCase,
     private val getConversationsUseCase: GetConversationsUseCase,
     private val getMessagesUseCase: GetMessagesUseCase,
     private val stopGenerationUseCase: StopGenerationUseCase,
-    private val createConversationUseCase: CreateConversationUseCase
+    private val createConversationUseCase: CreateConversationUseCase,
+    private val live2DManager: Live2DManager,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -43,6 +57,8 @@ class ChatViewModel @Inject constructor(
 
     init {
         Log.d("AIC", "ChatViewModel init START")
+        sttManager.initialize()
+        ttsManager.initialize()
         // Collect conversations
         viewModelScope.launch {
             getConversationsUseCase().collect { convs ->
@@ -81,7 +97,7 @@ class ChatViewModel @Inject constructor(
                     }
                     is STTEvent.FinalResult -> {
                         _state.update { it.copy(inputText = event.text, isRecording = false) }
-                        if (event.text.isNotBlank()) {
+                        if (_state.value.callMode && event.text.isNotBlank()) {
                             sendMessage(event.text)
                         }
                     }
@@ -121,11 +137,14 @@ class ChatViewModel @Inject constructor(
             is ChatIntent.StartGroupChat -> startGroupChat(intent.personaIds, intent.conversationId)
             is ChatIntent.SelectPersona -> selectPersona(intent.personaId)
             is ChatIntent.ToggleVoiceMode -> toggleVoiceMode()
+            is ChatIntent.ToggleCallMode -> toggleCallMode()
             is ChatIntent.Regenerate -> regenerate(intent.messageId)
             is ChatIntent.SwitchBranch -> switchBranch(intent.branchKey, intent.index)
             is ChatIntent.ToggleSidebar -> toggleSidebar()
             is ChatIntent.UpdateInput -> updateInput(intent.text)
             is ChatIntent.DismissError -> dismissError()
+            is ChatIntent.StartReply -> startReply(intent.messageId)
+            is ChatIntent.CancelReply -> cancelReply()
         }
     }
 
@@ -151,18 +170,24 @@ class ChatViewModel @Inject constructor(
 
         Log.d("AIC", "Validation passed, launching coroutine...")
         viewModelScope.launch {
-            _state.update { it.copy(inputText = "", streamState = StreamState.Connecting) }
+            ttsManager.stop()
+            _state.update { it.copy(inputText = "", streamState = StreamState.Connecting, currentStickerUri = null, replyTarget = null) }
 
             // Ensure conversation exists
             var conv = conversation
             if (conv == null) {
                 // Try pending conversation (group chat from navigation)
+                // Retry with delay: startGroupChat runs in a coroutine, may not have finished yet
                 val pendingId = _state.value.pendingConversationId
                 if (pendingId != null) {
-                    conv = chatRepository.getConversationById(pendingId)
-                    if (conv != null) {
-                        Log.d("AIC", "Loaded pending conversation: ${conv!!.id} group=${conv!!.isGroupChat}")
-                        _state.update { it.copy(activeConversation = conv, pendingConversationId = null) }
+                    repeat(5) { attempt ->
+                        conv = chatRepository.getConversationById(pendingId)
+                        if (conv != null) {
+                            Log.d("AIC", "Loaded pending conversation (attempt ${attempt+1}): ${conv!!.id} group=${conv!!.isGroupChat}")
+                            _state.update { it.copy(activeConversation = conv, pendingConversationId = null) }
+                            return@repeat
+                        }
+                        if (attempt < 4) kotlinx.coroutines.delay(100)
                     }
                 }
                 // If still null, create new ordinary conversation
@@ -183,6 +208,7 @@ class ChatViewModel @Inject constructor(
             }
 
             val memories = memoryRepository.searchRelevant(persona.id, text, Constants.DEFAULT_MEMORY_TOP_K)
+            memories.forEach { memoryRepository.markAccessed(it.id) }
             val recentMessages = getMessagesUseCase(conv!!.id).first()
             Log.d("AIC", "Got messages=${recentMessages.size}, memories=${memories.size}")
 
@@ -203,11 +229,18 @@ class ChatViewModel @Inject constructor(
                 conv.groupPersonaIds.mapNotNull { personaRepository.getById(it) }
                     .filter { it.id != persona.id }
             } else emptyList()
+            val replyTarget = currentState.replyTarget
+            val mood = analyzeMood(recentMessages)
+            val effectiveProvider = provider.copy(modelName = persona.modelName ?: provider.modelName)
+            Log.d("AIC", "sendMessage using model=${effectiveProvider.modelName}, persona.modelName=${persona.modelName}, provider.modelName=${provider.modelName}")
             val context = ChatContext(
                 persona = persona, messages = recentMessages,
-                memories = memories, provider = provider,
+                memories = memories, provider = effectiveProvider,
                 worldBookEntries = worldBookEntries,
-                groupPersonas = groupPersonas
+                groupPersonas = groupPersonas,
+                replyTargetContent = replyTarget?.content,
+                replyTargetSenderName = replyTarget?.senderPersonaName,
+                conversationMood = mood
             )
             val userMsg = MessageUi(id = newId(), role = "user", content = text, createdAt = now())
             _state.update { it.copy(messages = it.messages + userMsg) }
@@ -215,7 +248,12 @@ class ChatViewModel @Inject constructor(
             if (conv?.isGroupChat == true) {
                 // === GROUP CHAT: Swap-card round-robin ===
                 val allPersonaIds = conv.groupPersonaIds
-                val allPersonas = allPersonaIds.mapNotNull { personaRepository.getById(it) }
+                Log.d("AIC", "Group chat personaIds from conv: $allPersonaIds")
+                val allPersonas = allPersonaIds.mapNotNull { id ->
+                    val p = personaRepository.getById(id)
+                    if (p == null) Log.w("AIC", "Group chat: persona id=$id NOT FOUND")
+                    p
+                }
                 Log.d("AIC", "Group chat with ${allPersonas.size} personas: ${allPersonas.map { it.name }}")
 
                 // Save user message to DB
@@ -224,7 +262,7 @@ class ChatViewModel @Inject constructor(
                     role = "user", content = text, createdAt = userMsg.createdAt
                 ))
 
-                speakInGroupRoundRobin(conv, provider, userMsg, allPersonas, recentMessages, memories, worldBookEntries, text)
+                speakInGroupRoundRobin(conv, effectiveProvider, userMsg, allPersonas, recentMessages, memories, worldBookEntries, text)
             } else {
                 // === SINGLE CHAT: Original flow ===
                 // Stream response
@@ -252,14 +290,23 @@ class ChatViewModel @Inject constructor(
                         val finalText = (s.streamState as StreamState.Streaming).partialText
 
                         if (persona.waifuMode) {
-                            val waifuMsgs = processWaifuResponse(finalText, persona, conv!!.id)
-                            _state.update { it.copy(streamState = StreamState.Idle, messages = it.messages + waifuMsgs) }
+                            _state.update { it.copy(streamState = StreamState.Idle) }
+                            processWaifuResponse(finalText, persona, conv!!.id)
                         } else {
                             val assistantMsg = MessageUi(id = newId(), role = "assistant", content = finalText, emotion = detectEmotion(finalText)?.label, createdAt = now())
                             _state.update { it.copy(streamState = StreamState.Idle, messages = it.messages + assistantMsg) }
+                            speakWithTts(finalText)
                         }
+                        // Regex extraction (sync)
                         val extractedMemories = memoryExtractor.extractFromText(text + " " + finalText, persona.id)
                         extractedMemories.forEach { memoryRepository.save(it) }
+                        // LLM extraction (async, non-blocking)
+                        launch(Dispatchers.IO) {
+                            val llmMemories = memoryExtractor.extractWithLLM(
+                                listOf(text), listOf(finalText), persona.id, effectiveProvider
+                            )
+                            llmMemories.forEach { memoryRepository.save(it) }
+                        }
                     }
                     s.streamState is StreamState.Error -> {}
                     else -> _state.update { it.copy(streamState = StreamState.Idle, error = "未收到 AI 回复") }
@@ -277,6 +324,8 @@ class ChatViewModel @Inject constructor(
 
     private fun selectConversation(id: String) {
         messagesJob?.cancel()
+        val conv = _state.value.conversations.find { c -> c.id == id }
+        if (conv != null) UnreadTracker.clear(appContext, conv.personaId)
         messagesJob = viewModelScope.launch {
             // Load conversation from DB if not in memory yet
             var conv = _state.value.conversations.find { c -> c.id == id }
@@ -329,13 +378,14 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun selectPersona(personaId: String) {
+        UnreadTracker.clear(appContext, personaId)
         viewModelScope.launch {
             personaRepository.getById(personaId)?.let { persona ->
                 _state.update { it.copy(activePersona = persona, showPersonaPicker = false) }
                 // Only auto-resume if no conversation is already selected (e.g. group chat)
                 if (_state.value.activeConversation != null) return@launch
                 val latestConv = _state.value.conversations
-                    .filter { it.personaId == personaId && !it.isArchived }
+                    .filter { it.personaId == personaId && !it.isArchived && !it.isGroupChat }
                     .maxByOrNull { it.lastMessageAt }
                 if (latestConv != null) {
                     selectConversation(latestConv.id)
@@ -355,26 +405,127 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(voiceMode = !it.voiceMode) }
     }
 
+    private fun toggleCallMode() {
+        val entering = !_state.value.callMode
+        _state.update { it.copy(callMode = entering, voiceMode = entering) }
+        if (entering) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try { live2DManager.initialize() } catch (_: Exception) {}
+                _state.update { it.copy(live2DModel = live2DManager.activeModel) }
+                // Load STT on demand when mic is tapped, not here.
+                // TTS is loaded on demand per-sentence via speakLazyLoad.
+                // This keeps peak native memory low (one model at a time).
+            }
+        } else {
+            silenceTimer?.cancel()
+            accumulatedVoiceText = ""
+            onnxSTT.stop()
+            sttJob?.cancel()
+            _state.update { it.copy(isRecording = false) }
+            ttsManager.stop()
+            ttsManager.disableSherpaOnnx()
+            onnxSTT.release()
+        }
+    }
+
+    /** Speak AI response through TTS if voice mode is on. Cloud TTS when online, offline otherwise. */
+    private fun speakWithTts(text: String) {
+        if (!_state.value.voiceMode) return
+        viewModelScope.launch {
+            // Re-check voice mode inside coroutine to avoid stale state
+            if (!_state.value.voiceMode) return@launch
+
+            // Release STT before TTS to keep peak memory low
+            onnxSTT.release()
+
+            // Try cloud TTS if enabled, online, and DashScope key is set
+            val vp = com.aicompanion.core.common.VoicePrefs(appContext)
+            if (vp.isCloudEnabled()) {
+                val cm = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                val online = cm.activeNetwork != null
+                if (online) {
+                    val apiKey = vp.getApiKey()
+                    if (apiKey.isNotBlank()) {
+                        ttsManager.speakCloud(text, apiKey, vp.getVoice())
+                        return@launch
+                    }
+                }
+            }
+
+            // Fallback to offline AISHELL-3
+            val sid = _state.value.activePersona?.voiceSid ?: 0
+            val voicePrefs = com.aicompanion.core.common.VoicePrefs(appContext)
+            val prefs = voicePrefs.load()
+            val models = listOf(
+                "sherpa_models/tts/aishell3" to "vits-aishell3.int8.onnx"
+            )
+            val (dir, file) = models[prefs.selectedModelIndex.coerceIn(0, models.size - 1)]
+            ttsManager.speakLazyLoad(text, sid, dir, file)
+        }
+    }
+
+    private var sttJob: Job? = null
+
+    private var silenceTimer: Job? = null
+    private var accumulatedVoiceText = ""
+
     private fun toggleVoiceInput() {
         if (_state.value.isRecording) {
-            sttManager.stopListening()
+            silenceTimer?.cancel()
+            onnxSTT.stop()
+            sttJob?.cancel()
+            // In call mode, manual stop also sends accumulated text
+            if (_state.value.callMode && accumulatedVoiceText.isNotBlank()) {
+                val text = accumulatedVoiceText
+                accumulatedVoiceText = ""
+                sendMessage(text)
+            }
             _state.update { it.copy(isRecording = false) }
         } else {
-            // Check if any speech recognition service is installed
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            val activities = sttManager.context.packageManager.queryIntentActivities(intent, 0)
-            if (activities.isEmpty()) {
-                _state.update { it.copy(error = "未检测到语音识别服务，需要安装 Google 或系统语音输入") }
-                return
-            }
-            try {
-                sttManager.startListening()
-                _state.update { it.copy(isRecording = true, error = null) }
-            } catch (e: SecurityException) {
-                _state.update { it.copy(error = "需要录音权限才能使用语音输入") }
-            } catch (e: Exception) {
-                _state.update { it.copy(error = "语音启动失败: ${e.message}") }
+            val inCallMode = _state.value.callMode
+            accumulatedVoiceText = ""
+            _state.update { it.copy(isRecording = true, error = null) }
+            sttJob = viewModelScope.launch(Dispatchers.IO) {
+                if (onnxSTT.initialize() is com.aicompanion.core.common.Result.Error) {
+                    _state.update { it.copy(error = "语音引擎未就绪", isRecording = false) }
+                    return@launch
+                }
+                onnxSTT.startStreaming().collect {
+                    when (it) {
+                        is STTResult.Partial -> {
+                            accumulatedVoiceText = it.text
+                            _state.update { s -> s.copy(inputText = it.text) }
+                            // Call mode: reset 5-second silence timer, auto-send when timer fires
+                            if (inCallMode) {
+                                silenceTimer?.cancel()
+                                silenceTimer = launch {
+                                    delay(5000)
+                                    if (accumulatedVoiceText.isNotBlank()) {
+                                        val text = accumulatedVoiceText
+                                        accumulatedVoiceText = ""
+                                        _state.update { s -> s.copy(inputText = "", isRecording = false) }
+                                        onnxSTT.stop()
+                                        sttJob?.cancel()
+                                        sendMessage(text)
+                                    }
+                                }
+                            }
+                        }
+                        is STTResult.Final -> {
+                            _state.update { s -> s.copy(inputText = it.text, isRecording = false) }
+                            silenceTimer?.cancel()
+                            accumulatedVoiceText = ""
+                            if (inCallMode && it.text.isNotBlank()) {
+                                sendMessage(it.text)
+                            }
+                        }
+                        is STTResult.Error -> {
+                            _state.update { s -> s.copy(error = it.message, isRecording = false) }
+                            silenceTimer?.cancel()
+                        }
+                        else -> {}
+                    }
+                }
             }
         }
     }
@@ -437,7 +588,9 @@ class ChatViewModel @Inject constructor(
         val currentState = _state.value
         val conv = currentState.activeConversation ?: return
         val persona = currentState.activePersona ?: return
-        val provider = currentState.activeApiProvider ?: return
+        val provider = (currentState.activeApiProvider ?: return).let { p ->
+            currentState.activePersona?.let { persona -> p.copy(modelName = persona.modelName ?: p.modelName) } ?: p
+        }
 
         // Find the message being regenerated
         val msgIndex = currentState.messages.indexOfFirst { it.id == messageId }
@@ -456,6 +609,7 @@ class ChatViewModel @Inject constructor(
             _state.update { it.copy(streamState = StreamState.Connecting) }
 
             val memories = memoryRepository.searchRelevant(persona.id, userMsg.content, Constants.DEFAULT_MEMORY_TOP_K)
+            memories.forEach { memoryRepository.markAccessed(it.id) }
             val recentMessages = currentState.messages.take(msgIndex).map {
                 Message(id = it.id, conversationId = conv.id, role = it.role,
                     content = it.content, createdAt = it.createdAt)
@@ -467,11 +621,15 @@ class ChatViewModel @Inject constructor(
                     .filter { it.id != persona.id }
             } else emptyList()
 
+            val mood = analyzeMood(recentMessages)
             val context = ChatContext(
                 persona = persona, messages = recentMessages,
                 memories = memories, provider = provider,
                 worldBookEntries = worldBookEntries,
-                groupPersonas = groupPersonas
+                groupPersonas = groupPersonas,
+                replyTargetContent = currentState.replyTarget?.content,
+                replyTargetSenderName = currentState.replyTarget?.senderPersonaName,
+                conversationMood = mood
             )
 
             // Remove the old AI message being replaced (all branches of it)
@@ -520,6 +678,7 @@ class ChatViewModel @Inject constructor(
                             branchSelections = it.branchSelections + (branchKey to newBranchIndex)
                         )
                     }
+                    speakWithTts(finalText)
                 }
             } else {
                 _state.update { it.copy(streamState = StreamState.Idle) }
@@ -537,6 +696,15 @@ class ChatViewModel @Inject constructor(
 
     private fun dismissError() {
         _state.update { it.copy(error = null, showGroupPicker = false) }
+    }
+
+    private fun startReply(messageId: String) {
+        val target = _state.value.messages.find { it.id == messageId } ?: return
+        _state.update { it.copy(replyTarget = target) }
+    }
+
+    private fun cancelReply() {
+        _state.update { it.copy(replyTarget = null) }
     }
 
     fun updateConversationAvatar(id: String, avatarUri: String) {
@@ -613,24 +781,35 @@ class ChatViewModel @Inject constructor(
         worldBookEntries: List<WorldBookEntry>,
         userText: String
     ) {
+        if (allPersonas.isEmpty()) {
+            Log.e("AIC", "Group round-robin: allPersonas is empty!")
+            _state.update { it.copy(streamState = StreamState.Idle, error = "群聊角色列表为空") }
+            return
+        }
+        Log.d("AIC", "Group round-robin START: ${allPersonas.size} speakers — ${allPersonas.map { it.name }}")
+
         var sharedMessages = initialMessages.toMutableList()
-        // Start from round index
         var roundIdx = _state.value.groupRoundIndex % allPersonas.size
 
         for (i in allPersonas.indices) {
             val speaker = allPersonas[roundIdx]
-            Log.d("AIC", "Group round-robin: ${speaker.name} speaking (index $roundIdx)")
+            Log.d("AIC", "Group round-robin [$i/${allPersonas.size}]: ${speaker.name} (id=${speaker.id}) speaking, roundIdx=$roundIdx")
 
             _state.update { it.copy(currentSpeakerPersonaId = speaker.id, streamState = StreamState.Connecting) }
 
             // Build context for THIS speaker only
+            val mood = analyzeMood(sharedMessages.toList())
+            val speakerProvider = provider.copy(modelName = speaker.modelName ?: provider.modelName)
             val speakerContext = ChatContext(
                 persona = speaker,
                 messages = sharedMessages.toList(),
                 memories = memories,
-                provider = provider,
+                provider = speakerProvider,
                 worldBookEntries = worldBookEntries,
-                isGroupSpeakerTurn = true
+                isGroupSpeakerTurn = true,
+                replyTargetContent = _state.value.replyTarget?.content,
+                replyTargetSenderName = _state.value.replyTarget?.senderPersonaName,
+                conversationMood = mood
             )
 
             // Stream response from this speaker
@@ -647,40 +826,52 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                 }
+                Log.d("AIC", "Group speaker ${speaker.name} stream ended, responseLen=${responseText.length}")
             } catch (e: Exception) {
-                Log.e("AIC", "Group speaker ${speaker.name} exception: ${e.message}")
+                Log.e("AIC", "Group speaker ${speaker.name} exception: ${e.javaClass.simpleName}: ${e.message}", e)
             }
 
             // Save this speaker's message
             if (responseText.isNotBlank()) {
-                val msgId = newId()
-                val emotion = detectEmotion(responseText)?.label
-                val msgUi = MessageUi(
-                    id = msgId, role = "assistant", content = responseText,
-                    emotion = emotion, createdAt = now(),
-                    senderPersonaId = speaker.id
-                )
-                // Save to DB
-                chatRepository.saveMessage(Message(
-                    id = msgId, conversationId = conv.id,
-                    role = "assistant", content = responseText,
-                    emotion = emotion, createdAt = now(),
-                    senderPersonaId = speaker.id
-                ))
-                // Add to UI state
-                _state.update { it.copy(messages = it.messages + msgUi) }
-                // Add to shared history for next speaker
-                sharedMessages.add(Message(
-                    id = msgId, conversationId = conv.id,
-                    role = "assistant", content = responseText,
-                    emotion = emotion, createdAt = now(),
-                    senderPersonaId = speaker.id
-                ))
+                Log.d("AIC", "Group speaker ${speaker.name} saving message, len=${responseText.length}")
+                if (speaker.waifuMode) {
+                    // Waifu mode: split into sentence bubbles with stickers
+                    _state.update { it.copy(streamState = StreamState.Idle) }
+                    processWaifuResponse(responseText, speaker, conv.id, sharedMessages)
+                } else {
+                    val msgId = newId()
+                    val emotion = detectEmotion(responseText)?.label
+                    val msgUi = MessageUi(
+                        id = msgId, role = "assistant", content = responseText,
+                        emotion = emotion, createdAt = now(),
+                        senderPersonaId = speaker.id
+                    )
+                    // Save to DB
+                    chatRepository.saveMessage(Message(
+                        id = msgId, conversationId = conv.id,
+                        role = "assistant", content = responseText,
+                        emotion = emotion, createdAt = now(),
+                        senderPersonaId = speaker.id
+                    ))
+                    // Add to UI state
+                    _state.update { it.copy(messages = it.messages + msgUi) }
+                    speakWithTts(responseText)
+                    // Add to shared history for next speaker
+                    sharedMessages.add(Message(
+                        id = msgId, conversationId = conv.id,
+                        role = "assistant", content = responseText,
+                        emotion = emotion, createdAt = now(),
+                        senderPersonaId = speaker.id
+                    ))
+                }
+            } else {
+                Log.w("AIC", "Group speaker ${speaker.name} had EMPTY response, skipping message save")
             }
 
             roundIdx = (roundIdx + 1) % allPersonas.size
         }
 
+        Log.d("AIC", "Group round-robin DONE, final roundIdx=$roundIdx")
         // Save round index for next turn
         _state.update { it.copy(
             streamState = StreamState.Idle,
@@ -691,9 +882,12 @@ class ChatViewModel @Inject constructor(
 
     /** Waifu mode: split AI response into sentences, each in its own bubble with smart delay and sticker matching. */
     private suspend fun processWaifuResponse(
-        text: String, persona: Persona, conversationId: String
-    ): List<MessageUi> {
-        val messages = mutableListOf<MessageUi>()
+        text: String, persona: Persona, conversationId: String,
+        sharedMessages: MutableList<Message>? = null
+    ) {
+        // Clear streaming sticker so it doesn't leak onto waifu bubbles
+        _state.update { it.copy(currentStickerUri = null) }
+
         // Strip action expressions: *text*, (text), 【text】
         val cleaned = text
             .replace(Regex("\\*[^*]+\\*"), "")
@@ -712,27 +906,45 @@ class ChatViewModel @Inject constructor(
             // Fallback: single message
             val emotion = detectEmotion(cleaned)
             val sticker = stickerRepository.getRandomByEmotion(persona.id, emotion?.name?.lowercase() ?: "neutral")
-            messages.add(MessageUi(
+            val msg = MessageUi(
                 id = newId(), role = "assistant", content = cleaned,
                 emotion = emotion?.label, createdAt = now(),
+                senderPersonaId = persona.id,
+                stickerUri = sticker?.imagePath
+            )
+            chatRepository.saveMessage(Message(
+                id = msg.id, conversationId = conversationId,
+                role = "assistant", content = cleaned,
+                emotion = msg.emotion, createdAt = msg.createdAt,
                 senderPersonaId = persona.id
             ))
-            if (sticker != null) {
-                _state.update { it.copy(currentStickerUri = sticker.imagePath) }
-            }
-            return messages
+            sharedMessages?.add(Message(
+                id = msg.id, conversationId = conversationId,
+                role = "assistant", content = cleaned,
+                emotion = msg.emotion, createdAt = msg.createdAt,
+                senderPersonaId = persona.id
+            ))
+            _state.update { it.copy(messages = it.messages + msg) }
+            return
         }
+
+        // Put sticker only on the last sentence — one per full response
+        val lastIdx = sentences.size - 1
 
         for ((i, sentence) in sentences.withIndex()) {
             val emotion = detectEmotion(sentence)
-            val sticker = stickerRepository.getRandomByEmotion(persona.id, emotion?.name?.lowercase() ?: "neutral")
-            // Smart delay: 400ms base + 50ms per character
+            val stickerUri = if (i == lastIdx && emotion != null && emotion != Emotion.NEUTRAL) {
+                stickerRepository.getRandomByEmotion(persona.id, emotion.name.lowercase())?.imagePath
+            } else null
+
+            // Smart delay: 400ms base + 50ms per character, max 2s
             val delayMs = 400L + (sentence.length * 50L).coerceAtMost(2000L)
 
             val msg = MessageUi(
                 id = newId(), role = "assistant", content = sentence,
                 emotion = emotion?.label, createdAt = now() + i * delayMs,
-                senderPersonaId = persona.id
+                senderPersonaId = persona.id,
+                stickerUri = stickerUri
             )
             // Save to DB
             chatRepository.saveMessage(Message(
@@ -741,19 +953,19 @@ class ChatViewModel @Inject constructor(
                 emotion = msg.emotion, createdAt = msg.createdAt,
                 senderPersonaId = persona.id
             ))
-            // Set sticker for this message
-            if (sticker != null) {
-                _state.update { it.copy(currentStickerUri = sticker.imagePath) }
-            }
+            sharedMessages?.add(Message(
+                id = msg.id, conversationId = conversationId,
+                role = "assistant", content = sentence,
+                emotion = msg.emotion, createdAt = msg.createdAt,
+                senderPersonaId = persona.id
+            ))
 
-            messages.add(msg)
-            // Add to UI gradually to simulate typing delay
+            _state.update { s -> s.copy(messages = s.messages + msg) }
+            speakWithTts(sentence)
             if (i < sentences.size - 1) {
-                _state.update { s -> s.copy(messages = s.messages + msg) }
                 kotlinx.coroutines.delay(delayMs)
             }
         }
-        return messages
     }
 
     private fun splitGroupResponse(text: String, groupPersonas: List<Persona>): List<MessageUi> {
@@ -813,14 +1025,67 @@ class ChatViewModel @Inject constructor(
 
     private fun detectEmotion(text: String): Emotion? {
         val lower = text.lowercase()
+        // Score each emotion by keyword matches, pick the highest scorer
+        data class Score(val emotion: Emotion, val count: Int)
+        val scores = listOf(
+            Score(Emotion.HAPPY, countMatches(lower,
+                "哈哈", "嘻嘻", "嘿嘿", "呵呵", "开心", "高兴", "快乐", "幸福", "太好了", "真好",
+                "喜欢", "爱你", "爱", "想你", "想你了", "亲爱的", "好想你",
+                "棒", "厉害", "赞", "酷", "太棒了", "好厉害", "绝了", "nice",
+                "😊", "😄", "☺", "😁", "😆", "😂", "🤣", "❤", "💕", "💗", "💖", "😍", "🥰", "😘", "^_^")),
+            Score(Emotion.SAD, countMatches(lower,
+                "难过", "伤心", "哭泣", "哭了", "呜呜", "唉", "叹气", "遗憾", "可惜",
+                "不开心", "不高兴", "郁闷", "低落", "悲伤",
+                "😢", "😭", "💔", "😞", "😔", "😟", "😿")),
+            Score(Emotion.ANGRY, countMatches(lower,
+                "生气", "可恶", "讨厌", "混蛋", "过分", "烦", "烦死了", "滚", "闭嘴",
+                "气死", "受不了", "恶心", "不要脸",
+                "哼", "切",
+                "😠", "😡", "🤬", "💢", "😤")),
+            Score(Emotion.SURPRISED, countMatches(lower,
+                "哇", "天哪", "真的假的", "不会吧", "什么", "竟然", "居然",
+                "不可思议", "吓", "震惊", "惊呆了",
+                "😲", "😮", "😯", "😳", "🤯")),
+            Score(Emotion.SHY, countMatches(lower,
+                "害羞", "⁄", "不好意思", "脸红", "⁄⁄", "扭捏", "羞涩",
+                "别这样", "不要啦", "人家",
+                "😳", "☺️", "👉👈", "🥺")),
+            Score(Emotion.THINKING, countMatches(lower,
+                "嗯", "唔", "呃", "这个嘛", "让我想想", "我想想",
+                "等等", "等一下", "稍等",
+                "🤔", "💭"))
+        )
+        val best = scores.maxByOrNull { it.count } ?: return null
+        return if (best.count > 0) best.emotion else null
+    }
+
+    private fun countMatches(text: String, vararg keywords: String): Int =
+        keywords.count { text.contains(it) }
+
+    /** Analyze the emotional mood of recent conversation turns. */
+    private fun analyzeMood(recentMessages: List<com.aicompanion.domain.model.Message>): String {
+        if (recentMessages.isEmpty()) return "neutral"
+        val recent = recentMessages.takeLast(6)
+        val userMessages = recent.filter { it.role == "user" }
+        val combined = userMessages.joinToString(" ") { it.content.lowercase() }
         return when {
-            lower.contains("哈哈") || lower.contains("开心") || lower.contains("😊") -> Emotion.HAPPY
-            lower.contains("难过") || lower.contains("伤心") || lower.contains("😢") -> Emotion.SAD
-            lower.contains("生气") || lower.contains("可恶") || lower.contains("😠") -> Emotion.ANGRY
-            lower.contains("哇") || lower.contains("天哪") || lower.contains("😲") -> Emotion.SURPRISED
-            lower.contains("害羞") || lower.contains("⁄") || lower.contains("😳") -> Emotion.SHY
-            lower.contains("嗯") && lower.length < 10 -> Emotion.THINKING
-            else -> null
+            combined.contains("哈哈") || combined.contains("开心") || combined.contains("笑") -> "happy"
+            combined.contains("难过") || combined.contains("伤心") || combined.contains("哭") || combined.contains("累") -> "sad"
+            combined.contains("生气") || combined.contains("烦") || combined.contains("可恶") -> "angry"
+            combined.contains("哇") || combined.contains("天哪") || combined.contains("惊喜") -> "excited"
+            combined.length < 30 -> "flat"
+            else -> "neutral"
         }
+    }
+
+    /** Higher = stronger emotion, for picking the best sentence to attach a sticker to. */
+    private fun emotionStrength(emotion: Emotion): Int = when (emotion) {
+        Emotion.HAPPY -> 3
+        Emotion.SURPRISED -> 3
+        Emotion.ANGRY -> 2
+        Emotion.SAD -> 2
+        Emotion.SHY -> 1
+        Emotion.THINKING -> 1
+        Emotion.NEUTRAL -> 0
     }
 }

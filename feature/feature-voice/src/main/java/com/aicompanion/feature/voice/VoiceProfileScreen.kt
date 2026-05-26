@@ -87,10 +87,18 @@ fun VoiceProfileScreen(
             }
 
             val presets = listOf(
-                VoicePresetData("温柔女声", "知性温柔的女性声音", "system", "zh-CN-female-1"),
-                VoicePresetData("元气少女", "活泼可爱的少女音色", "system", "zh-CN-female-2"),
-                VoicePresetData("沉稳男声", "温暖沉稳的男性声音", "system", "zh-CN-male-1"),
-                VoicePresetData("清澈女声", "清亮透明的女性声音", "system", "zh-CN-female-4"),
+                // VITS presets (sherpa-onnx)
+                VoicePresetData("VITS · 温柔知性", "AISHELL-3 女声", "sherpa_onnx", "aishell3-0", ttsModel = "aishell3", ttsSid = 0),
+                VoicePresetData("VITS · 元气少女", "AISHELL-3 活泼女声", "sherpa_onnx", "aishell3-25", ttsModel = "aishell3", ttsSid = 25),
+                VoicePresetData("VITS · 成熟御姐", "AISHELL-3 沉稳女声", "sherpa_onnx", "aishell3-50", ttsModel = "aishell3", ttsSid = 50),
+                VoicePresetData("VITS · 软萌可爱", "AISHELL-3 甜美声线", "sherpa_onnx", "aishell3-75", ttsModel = "aishell3", ttsSid = 75),
+                VoicePresetData("VITS · 清冷少女", "AISHELL-3 清澈声线", "sherpa_onnx", "aishell3-100", ttsModel = "aishell3", ttsSid = 100),
+                VoicePresetData("VITS · 温暖男声", "AISHELL-3 男生音色", "sherpa_onnx", "aishell3-150", ttsModel = "aishell3", ttsSid = 150),
+                VoicePresetData("VITS · 刻晴", "原神角色声线", "sherpa_onnx", "keqing-0", ttsModel = "keqing", ttsSid = 0),
+                VoicePresetData("VITS · 优菈", "原神角色声线", "sherpa_onnx", "eula-0", ttsModel = "eula", ttsSid = 0),
+                // System TTS fallbacks
+                VoicePresetData("系统 · 女声", "系统默认中文女声", "system", "zh-CN-female-1"),
+                VoicePresetData("系统 · 男声", "系统默认中文男声", "system", "zh-CN-male-1"),
             )
 
             items(presets) { preset ->
@@ -102,8 +110,8 @@ fun VoiceProfileScreen(
                                 val profile = VoiceProfile(
                                     id = newId(), name = preset.name,
                                     engineType = preset.engineType, voiceId = preset.voiceId,
-                                    pitch = pitch, speed = speed,
-                                    isActive = true, createdAt = now()
+                                    pitch = pitch, speed = speed, isActive = true, createdAt = now(),
+                                    ttsModel = preset.ttsModel, ttsSid = preset.ttsSid
                                 )
                                 voiceRepository.createProfile(profile)
                             }
@@ -172,5 +180,6 @@ fun VoiceProfileScreen(
 }
 
 private data class VoicePresetData(
-    val name: String, val description: String, val engineType: String, val voiceId: String
+    val name: String, val description: String, val engineType: String, val voiceId: String,
+    val ttsModel: String = "", val ttsSid: Int = 0
 )

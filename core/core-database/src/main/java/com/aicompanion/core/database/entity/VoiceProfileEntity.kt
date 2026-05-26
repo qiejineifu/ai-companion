@@ -12,5 +12,7 @@ data class VoiceProfileEntity(
     val pitch: Float = 1.0f,
     val speed: Float = 1.0f,
     val isActive: Boolean = false,
-    val createdAt: Long
+    val createdAt: Long,
+    val ttsModel: String = "",
+    val ttsSid: Int = 0
 )

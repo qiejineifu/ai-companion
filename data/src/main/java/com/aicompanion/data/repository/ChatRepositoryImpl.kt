@@ -100,8 +100,8 @@ class ChatRepositoryImpl(
             }
             Log.d("AIC", "SSE stream ended, fullResponse length=${fullResponse.length}")
 
-            // 4. Save assistant message (skip for group speaker turns - ViewModel handles it)
-            if (!context.isGroupSpeakerTurn) {
+            // 4. Save assistant message (skip for waifu mode & group speaker turns - ViewModel handles it)
+            if (!context.isGroupSpeakerTurn && !context.persona.waifuMode) {
                 val emotion = detectEmotion(fullResponse)
                 val assistantMsg = Message(
                     id = newId(), conversationId = conversationId,
@@ -146,115 +146,208 @@ class ChatRepositoryImpl(
     private fun buildApiMessages(context: ChatContext, currentMsg: String): List<Map<String, String>> {
         val messages = mutableListOf<Map<String, String>>()
         val persona = context.persona
-        val systemContent = buildString {
-            // Role definition
-            append(persona.systemPrompt)
 
-            // Scenario / world building
-            if (persona.scenario.isNotBlank()) {
-                append("\n\n【场景】${persona.scenario}")
-            }
+        // Layer 1: System prompt — short role statement (SillyTavern style)
+        applySystemPrompt(messages, persona)
 
-            // Speaking style & relationship
-            append("\n\n【说话风格】${persona.speakingStyle}")
-            append("\n【关系定位】${persona.relationshipType}")
+        // Layer 2: Character card — description fields
+        applyCharacterCard(messages, context)
 
-            // User identity
-            if (persona.userDisplayName.isNotBlank()) {
-                append("\n\n用户的名字是「${persona.userDisplayName}」，请在对话中用这个名字称呼用户。")
-            }
+        // Layer 3: Example chats — separated section (SillyTavern style)
+        applyExampleChats(messages, persona.exampleChats)
 
-            // Example chats for tone reference
-            if (persona.exampleChats.isNotEmpty()) {
-                append("\n\n【参考对话风格】")
-                persona.exampleChats.forEach { append("\n$it") }
-            }
-        }
-        messages.add(mapOf("role" to "system", "content" to systemContent))
+        // Layer 4: Chat guidance — rhythm, bans, mood
+        applyChatGuidance(messages, context)
 
-        // Waifu mode: instruct AI to avoid action descriptions, let stickers handle emotions
-        if (persona.waifuMode) {
-            messages.add(mapOf("role" to "system", "content" to
-                "【Waifu模式】不要使用动作描写或括号心理活动（如 *微笑*、（脸红）、【叹气】）。" +
-                "用自然的对话表达情绪。每句话保持简短，像真人发消息一样。可以适当使用emoji但不要过多。"))
-        }
-
-        // If the AI initiated this conversation (proactive message), remind it
-        val lastMsg = context.messages.lastOrNull()
-        if (lastMsg != null && lastMsg.role == "assistant") {
-            messages.add(mapOf("role" to "system", "content" to
-                "注意：你刚才主动给用户发了一条消息，现在用户回复你了。这不是新话题的开始，请自然地接上你刚才说的话，继续聊下去。"))
-        }
-
-        // Group chat: light context only (each speaker gets their own persona card via swap-card)
-        if (context.groupPersonas.isNotEmpty()) {
-            val otherNames = context.groupPersonas.joinToString("、") { it.name }
-            messages.add(mapOf("role" to "system", "content" to
-                "你正在一个群聊中发言。群里还有：$otherNames。只以你的角色身份说话，不要替其他人发言。"))
-        }
-
-        // Inject relevant memories
-        if (context.memories.isNotEmpty()) {
-            val memoryText = context.memories.joinToString("\n") { "- ${it.content}" }
-            messages.add(mapOf("role" to "system", "content" to "以下是关于用户的相关记忆:\n$memoryText"))
-        }
-
-        // World Book injection — scan recent user messages for keyword matches
+        // Layer 5: World book "before" entries
         val worldBookBefore = mutableListOf<String>()
         val worldBookAfter = mutableListOf<String>()
-        if (context.worldBookEntries.isNotEmpty()) {
-            val recentUserMessages = context.messages.takeLast(10)
-                .filter { it.role == "user" }
-                .joinToString(" ") { it.content }
-                .lowercase()
+        collectWorldBookEntries(context, worldBookBefore, worldBookAfter)
+        worldBookBefore.forEach { messages.add(mapOf("role" to "system", "content" to it)) }
 
-            val activeEntries = context.worldBookEntries
-                .filter { it.enabled }
-                .sortedByDescending { it.priority }
+        // Layer 6: Situational context
+        applySituationalContext(messages, context)
 
-            for (entry in activeEntries) {
-                val triggered = entry.constant || entry.keywords.any { kw ->
-                    recentUserMessages.contains(kw.lowercase())
-                } || entry.secondaryKeywords.any { sk ->
-                    recentUserMessages.contains(sk.lowercase())
-                }
-                if (!triggered) continue
+        // Layer 7: Recent conversation history
+        applyRecentMessages(messages, context)
 
-                val entryText = buildString {
-                    append("【${entry.key}】")
-                    append("\n${entry.content}")
-                }
-                when (entry.position) {
-                    "after" -> worldBookAfter.add(entryText)
-                    else -> worldBookBefore.add(entryText)
-                }
-            }
-        }
-
-        // "before" entries — go before the message history
-        worldBookBefore.forEach { text ->
-            messages.add(mapOf("role" to "system", "content" to text))
-        }
-
-        // Recent conversation history (last N messages)
-        val recentMessages = context.messages.takeLast(Constants.DEFAULT_CONTEXT_WINDOW * 2)
-        recentMessages.forEach { msg ->
-            messages.add(mapOf("role" to msg.role, "content" to msg.content))
-        }
-
-        // Author's Note — injected after recent messages, before current user message
+        // Layer 8: World book "after" + Author's Note
         if (persona.authorsNote.isNotBlank()) {
             messages.add(mapOf("role" to "system", "content" to "[Author's Note: ${persona.authorsNote}]"))
         }
+        worldBookAfter.forEach { messages.add(mapOf("role" to "system", "content" to it)) }
 
-        // "after" entries — go after the message history, before current user message
-        worldBookAfter.forEach { text ->
-            messages.add(mapOf("role" to "system", "content" to text))
+        // Layer 9: System reminders — time awareness (AstrBot pattern)
+        applySystemReminders(messages)
+
+        // Layer 10: Mode-specific instructions
+        if (persona.waifuMode) {
+            messages.add(mapOf("role" to "system", "content" to
+                "【重要】你在和人发消息聊天，不是写故事。\n" +
+                "- 每条不超过20字，像微信聊天一样简短\n" +
+                "- 用口语说话：说「好呀」不说「好的呢」，说「嗯嗯」不说「我明白了」\n" +
+                "- 有话就说，没话就问。不要铺垫，不要叙述场景\n" +
+                "- 禁止：任何形式的情节描述、环境描写、第三人称旁白\n" +
+                "- emoji 每条约1个就够了"))
+        } else if (persona.chuanYueMode) {
+            messages.add(mapOf("role" to "system", "content" to
+                "【穿越模式】你正和用户进行沉浸式互动。你们身处同一场景中，可以真实地互动。\n" +
+                "- 你可以自由地、细致地用*动作*、表情、感受、环境细节来丰富互动\n" +
+                "- 不限制篇幅长短，想写多少写多少，只要互动真实自然\n" +
+                "- 行动和对话自然地交织，像真正的面对面相处\n" +
+                "- 用户会描述ta的行为、场景、细节，你始终融入其中并自然地回应\n" +
+                "- 保持你的角色性格和身份，把你的特质融入每一个动作和每一句话里"))
         }
 
-        // Current message
         messages.add(mapOf("role" to "user", "content" to currentMsg))
         return messages
+    }
+
+    // ── Layer helpers ──
+
+    /** Single consolidated persona prompt — role + character + rules in one message */
+    private fun applySystemPrompt(messages: MutableList<Map<String, String>>, persona: com.aicompanion.domain.model.Persona) {
+        val content = "你是${persona.name}。正在和用户一对一发消息聊天。\n\n" +
+            (if (persona.chuanYueMode)
+                "【模式】沉浸式互动。你正和用户在同一场景中相处。你可以自然且细致地用*动作*描述你在做什么、你的表情、你感受到的、你周围的一切。篇幅不限，尽情描写。你的每一个动作、每一句话都是你角色身份的自然流露。\n\n"
+            else
+                "【重要】你不是在写故事。直接说话，不要叙述场景、描写环境、第三人称旁白。\n" +
+                "严禁：星号*动作*、括号（心理）、【描写】。不要用「好的呢」「没问题」开头。\n\n"
+            ) +
+            persona.systemPrompt
+        messages.add(mapOf("role" to "system", "content" to content))
+    }
+
+    /** Character card — scenario, relationship, speaking style */
+    private fun applyCharacterCard(messages: MutableList<Map<String, String>>, ctx: ChatContext) {
+        val p = ctx.persona
+        val parts = mutableListOf<String>()
+        if (p.scenario.isNotBlank()) parts.add("场景：${p.scenario}")
+        if (p.relationshipType.isNotBlank()) {
+            var rel = "和用户的关系：${p.relationshipType}"
+            if (p.userDisplayName.isNotBlank()) rel += "，用户叫「${p.userDisplayName}」"
+            parts.add(rel)
+        }
+        if (p.speakingStyle.isNotBlank()) parts.add("说话方式：${p.speakingStyle}")
+        if (parts.isEmpty()) return
+        messages.add(mapOf("role" to "system", "content" to parts.joinToString("\n") { "$it。" }))
+    }
+
+    /** Example chats as separate section */
+    private fun applyExampleChats(messages: MutableList<Map<String, String>>, examples: List<String>) {
+        if (examples.isEmpty()) return
+        messages.add(mapOf("role" to "system", "content" to
+            "以下是你之前的对话示例：\n---\n${examples.joinToString("\n")}\n---"))
+    }
+
+    /** Chat guidance — rhythm tips, mood (no duplicate bans) */
+    private fun applyChatGuidance(messages: MutableList<Map<String, String>>, ctx: ChatContext) {
+        val p = ctx.persona
+        val parts = mutableListOf("回复有长有短，偶尔主动提问。")
+        if (!p.waifuMode && !p.chuanYueMode) parts.add("不要问「还有什么想聊的吗」。")
+        if (ctx.conversationMood != "neutral") {
+            val hint = when (ctx.conversationMood) {
+                "happy" -> "对方心情不错，你可以活泼一点"
+                "sad" -> "对方心情似乎不太好，先共情，别急着讲道理"
+                "angry" -> "对方在生气，先表示理解"
+                "excited" -> "对方很兴奋，一起开心"
+                "flat" -> "对方话不多，主动找话题"
+                else -> ""
+            }
+            if (hint.isNotBlank()) parts.add(hint)
+        }
+        messages.add(mapOf("role" to "system", "content" to parts.joinToString(" ") { "$it" }))
+    }
+
+    private fun collectWorldBookEntries(ctx: ChatContext, before: MutableList<String>, after: MutableList<String>) {
+        if (ctx.worldBookEntries.isEmpty()) return
+        val recentUserText = ctx.messages.takeLast(10)
+            .filter { it.role == "user" }
+            .joinToString(" ") { it.content }
+            .lowercase()
+        for (entry in ctx.worldBookEntries.filter { it.enabled }.sortedByDescending { it.priority }) {
+            val triggered = entry.constant || entry.keywords.any { recentUserText.contains(it.lowercase()) }
+                || entry.secondaryKeywords.any { recentUserText.contains(it.lowercase()) }
+            if (!triggered) continue
+            val text = "【${entry.key}】\n${entry.content}"
+            if (entry.position == "after") after.add(text) else before.add(text)
+        }
+    }
+
+    private fun applySituationalContext(messages: MutableList<Map<String, String>>, ctx: ChatContext) {
+        // Proactive message reminder
+        if (!ctx.isGroupSpeakerTurn) {
+            val lastMsg = ctx.messages.lastOrNull()
+            if (lastMsg != null && lastMsg.role == "assistant") {
+                messages.add(mapOf("role" to "system", "content" to
+                    "注意：你刚才主动给用户发了一条消息，现在用户回复你了。这不是新话题的开始，请自然地接上你刚才说的话，继续聊下去。"))
+            }
+        }
+        // Group chat
+        if (ctx.groupPersonas.isNotEmpty()) {
+            val names = ctx.groupPersonas.joinToString("、") { it.name }
+            messages.add(mapOf("role" to "system", "content" to
+                "你正在一个群聊中发言。群里还有：$names。只以你的角色身份说话，不要替其他人发言。"))
+        }
+        // Memories
+        if (ctx.memories.isNotEmpty()) {
+            val text = ctx.memories.joinToString("；") { it.content.replace(Regex("^\\[\\w+\\]\\s*"), "") }
+            messages.add(mapOf("role" to "system", "content" to "关于用户: $text"))
+        }
+        // User profile (compact, from persona)
+        val profile = ctx.persona.userProfile
+        if (profile != null && (profile.name != null || profile.facts.isNotEmpty() || profile.preferences.isNotEmpty())) {
+            val parts = mutableListOf<String>()
+            if (profile.name != null) parts.add("用户叫${profile.name}")
+            parts.addAll(profile.facts)
+            parts.addAll(profile.preferences)
+            val profileText = parts.joinToString("；")
+            messages.add(mapOf("role" to "system", "content" to "关于用户: $profileText"))
+        }
+        // Persona's recent moments (so AI knows what it posted on 朋友圈)
+        val recentMoments = ctx.persona.moments.takeLast(3)
+        if (recentMoments.isNotEmpty()) {
+            val text = recentMoments.joinToString("；") { it.content }
+            messages.add(mapOf("role" to "system", "content" to "你最近发过的朋友圈: $text"))
+        }
+        // Persona's recent experiences
+        val recentExps = ctx.persona.experiences.takeLast(2)
+        if (recentExps.isNotEmpty()) {
+            val text = recentExps.joinToString("；") { "${it.title}: ${it.content.take(80)}" }
+            messages.add(mapOf("role" to "system", "content" to "你最近的经历: $text"))
+        }
+        // Reply target
+        if (!ctx.replyTargetContent.isNullOrBlank()) {
+            val prompt = if (!ctx.replyTargetSenderName.isNullOrBlank()) {
+                "用户引用了${ctx.replyTargetSenderName}的消息：「${ctx.replyTargetContent}」。请以你的角色身份直接回应这个引用。"
+            } else {
+                "用户引用了你之前说的这句话：「${ctx.replyTargetContent}」。请直接回应这句话。"
+            }
+            messages.add(mapOf("role" to "system", "content" to prompt))
+        }
+    }
+
+    private fun applyRecentMessages(messages: MutableList<Map<String, String>>, ctx: ChatContext) {
+        ctx.messages.takeLast(Constants.DEFAULT_CONTEXT_WINDOW * 2).forEach { msg ->
+            messages.add(mapOf("role" to msg.role, "content" to msg.content))
+        }
+    }
+
+    /** Inject time awareness so AI naturally adapts tone (AstrBot <system_reminder> pattern). */
+    private fun applySystemReminders(messages: MutableList<Map<String, String>>) {
+        val now = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+        val timeStr = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+        val hour = now.hour
+        val timeHint = when {
+            hour in 5..7 -> "现在是清晨"
+            hour in 8..11 -> "现在是上午"
+            hour in 12..13 -> "现在是中午"
+            hour in 14..17 -> "现在是下午"
+            hour in 18..22 -> "现在是晚上"
+            else -> "现在是深夜"
+        }
+        messages.add(mapOf("role" to "system", "content" to
+            "<system_reminder>\n$timeHint，当前时间：$timeStr (CST)\n</system_reminder>"))
     }
 
     private fun detectEmotion(text: String): String {

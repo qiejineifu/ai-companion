@@ -1,120 +1,152 @@
 package com.aicompanion.feature.voice
 
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.content.Context
+import android.util.Log
 import com.aicompanion.core.common.Result
+import com.k2fsa.sherpa.onnx.OfflineTts
+import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
 
-/**
- * Sherpa-ONNX offline TTS engine wrapper.
- * Phase 3: Requires sherpa-onnx AAR in libs/ directory.
- * Model: sherpa-onnx-vits-zh-ll (or piper-zh) ~60-120MB.
- */
-class SherpaOnnxTTS(private val context: Context) {
+@Singleton
+class SherpaOnnxTTS @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private var tts: OfflineTts? = null
+    private var currentModel: String = ""
+    private var isSpeaking = false
+    private var isReleased = false
+    private val stateLock = Any()
+    private val nativeLock = Any()
 
-    data class ModelInfo(
-        val name: String,
-        val language: String,
-        val sizeMB: Int,
-        val url: String
-    )
+    data class TTSResult(val samples: FloatArray, val sampleRate: Int)
 
-    companion object {
-        val AVAILABLE_MODELS = listOf(
-            ModelInfo("VITS 中文女声", "zh-CN", 64, "sherpa-onnx-vits-zh-ll"),
-            ModelInfo("VITS 中文男声", "zh-CN", 68, "sherpa-onnx-vits-zh-aishell3"),
-            ModelInfo("Piper 中文通用", "zh-CN", 52, "sherpa-onnx-piper-zh"),
-        )
-    }
-
-    private var isInitialized = false
-    private var modelDir: File
-
-    init {
-        modelDir = File(context.filesDir, "sherpa_models/tts")
-        modelDir.mkdirs()
-    }
-
-    suspend fun initialize(modelName: String = "sherpa-onnx-vits-zh-ll"): Result<Boolean> {
-        return withContext(Dispatchers.IO) {
+    suspend fun loadModel(modelDir: String, modelFile: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        synchronized(stateLock) {
+            if (tts != null && currentModel == modelFile) return@withContext Result.Success(true)
             try {
-                val modelFile = File(modelDir, "$modelName/model.onnx")
-                val tokensFile = File(modelDir, "$modelName/tokens.txt")
-
-                if (!modelFile.exists() || !tokensFile.exists()) {
-                    return@withContext Result.Error("模型文件未下载，请先下载离线语音模型")
-                }
-
-                // In production: initialize SherpaOnnxTTS engine
-                // val config = OnlineTtsConfig(
-                //     model = OfflineTtsVitsModelConfig(
-                //         model = modelFile.absolutePath,
-                //         tokens = tokensFile.absolutePath,
-                //     )
-                // )
-                // tts = OfflineTts(config)
-
-                isInitialized = true
+                releaseInternal()
+                val hasLexicon = try {
+                    context.assets.open("$modelDir/lexicon.txt").use { true }
+                } catch (_: Exception) { false }
+                val vitsConfig = OfflineTtsVitsModelConfig(
+                    model = "$modelDir/$modelFile",
+                    lexicon = if (hasLexicon) "$modelDir/lexicon.txt" else "",
+                    tokens = "$modelDir/tokens.txt"
+                )
+                val config = OfflineTtsConfig(
+                    model = OfflineTtsModelConfig(vits = vitsConfig, numThreads = 1)
+                )
+                tts = OfflineTts(context.assets, config)
+                isReleased = false
+                currentModel = modelFile
+                Log.i("SherpaOnnxTTS", "Model loaded: $modelFile (lexicon=${if (hasLexicon) "yes" else "no"})")
                 Result.Success(true)
             } catch (e: Exception) {
-                Result.Error("初始化离线 TTS 失败: ${e.message}", e)
+                Log.e("SherpaOnnxTTS", "Load failed for $modelFile: ${e.message}", e)
+                Result.Error("TTS模型加载失败: ${e.message}", e)
             }
         }
     }
 
-    suspend fun synthesize(text: String, speed: Float = 1.0f): Result<ByteArray> {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (!isInitialized) {
-                    return@withContext Result.Error("离线 TTS 引擎未初始化")
+    fun generate(text: String, sid: Int = 0, speed: Float = 1.0f): TTSResult? {
+        synchronized(nativeLock) {
+            val t = tts ?: return null
+            val audio = t.generate(text, sid = sid, speed = speed)
+            return TTSResult(audio.samples, audio.sampleRate)
+        }
+    }
+
+    suspend fun speak(text: String, sid: Int = 0, speed: Float = 1.0f) {
+        // Wait for previous speech
+        var acquired = false
+        while (!acquired) {
+            synchronized(stateLock) {
+                if (isReleased) return
+                if (!isSpeaking) {
+                    isSpeaking = true
+                    acquired = true
                 }
-
-                // In production: generate audio
-                // val audio = tts.generate(text, sid = 1, speed = speed)
-                // Result.Success(audio.samples)
-
-                // Placeholder: return empty bytes (model not bundled)
-                Result.Success(ByteArray(0))
-            } catch (e: Exception) {
-                Result.Error("语音合成失败: ${e.message}", e)
             }
+            if (!acquired) kotlinx.coroutines.delay(50)
         }
-    }
 
-    suspend fun downloadModel(modelInfo: ModelInfo, onProgress: (Float) -> Unit): Result<Boolean> {
-        return withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
-                val modelDir = File(modelDir, modelInfo.name)
-                modelDir.mkdirs()
-
-                // In production: download from modelInfo.url
-                onProgress(0.5f)
-
-                // Simulate download
-                kotlinx.coroutines.delay(500)
-                onProgress(1.0f)
-
-                Result.Success(true)
-            } catch (e: Exception) {
-                Result.Error("模型下载失败: ${e.message}", e)
-            }
+                synchronized(stateLock) {
+                    if (isReleased) { isSpeaking = false; return@withContext }
+                }
+                val audio = synchronized(nativeLock) {
+                    tts?.generate(text, sid = sid, speed = speed)
+                } ?: run { synchronized(stateLock) { isSpeaking = false }; return@withContext }
+                synchronized(stateLock) {
+                    if (isReleased) { isSpeaking = false; return@withContext }
+                }
+                playPCM(audio.samples, audio.sampleRate)
+            } catch (_: Exception) {}
         }
+
+        synchronized(stateLock) { isSpeaking = false }
     }
 
-    fun isModelDownloaded(modelName: String): Boolean {
-        val modelFile = File(modelDir, "$modelName/model.onnx")
-        return modelFile.exists()
+    fun stop() {
+        synchronized(stateLock) { isSpeaking = false }
     }
 
-    fun getDownloadedModels(): List<String> {
-        return modelDir.listFiles()
-            ?.filter { File(it, "model.onnx").exists() }
-            ?.map { it.name }
-            ?: emptyList()
+    val speaking: Boolean get() = synchronized(stateLock) { isSpeaking }
+
+    private fun playPCM(samples: FloatArray, sampleRate: Int) {
+        val shorts = ShortArray(samples.size) { i ->
+            (samples[i] * 32767f).toInt().coerceIn(-32768, 32767).toShort()
+        }
+        val totalBytes = shorts.size * 2
+
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(sampleRate)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+            .setBufferSizeInBytes(totalBytes)
+            .setTransferMode(AudioTrack.MODE_STATIC).build()
+
+        track.write(shorts, 0, shorts.size)
+        track.play()
+        val durationMs = (samples.size.toLong() * 1000 / sampleRate) + 300
+        Thread.sleep(durationMs)
+        try { track.stop(); track.release() } catch (_: Exception) {}
     }
 
     fun release() {
-        isInitialized = false
+        synchronized(stateLock) {
+            isReleased = true
+            isSpeaking = false
+        }
+        synchronized(nativeLock) {
+            tts?.release()
+            tts = null
+            currentModel = ""
+        }
+    }
+
+    private fun releaseInternal() {
+        // Called from loadModel's synchronized(stateLock) block
+        isReleased = true
+        isSpeaking = false
+        synchronized(nativeLock) {
+            tts?.release()
+            tts = null
+            currentModel = ""
+        }
     }
 }

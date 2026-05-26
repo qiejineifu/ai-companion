@@ -34,14 +34,22 @@ import com.aicompanion.domain.repository.*
 import com.aicompanion.feature.apiconfig.presentation.ApiConfigScreen
 import com.aicompanion.feature.apiconfig.presentation.ApiConfigViewModel
 import com.aicompanion.feature.chat.presentation.*
+import java.io.File
 import com.aicompanion.feature.live2d.Live2DManager
 import com.aicompanion.feature.live2d.Live2DModelManagerScreen
 import com.aicompanion.feature.memory.presentation.MemoryScreen
 import com.aicompanion.feature.memory.presentation.MemoryViewModel
+import com.aicompanion.app.proactive.ExperienceGeneratorWorker
+import com.aicompanion.app.proactive.MomentGeneratorWorker
+import com.aicompanion.feature.persona.presentation.ExperiencesScreen
+import com.aicompanion.feature.persona.presentation.MomentsScreen
+import com.aicompanion.feature.persona.presentation.PersonaGuidedBuilder
+import com.aicompanion.feature.persona.presentation.RensheShichangScreen
 import com.aicompanion.feature.persona.presentation.PersonaScreen
 import com.aicompanion.feature.persona.presentation.PersonaSettingsScreen
 import com.aicompanion.feature.persona.presentation.PersonaViewModel
 import com.aicompanion.feature.settings.presentation.*
+import com.aicompanion.core.common.ImageGenConfig
 import com.aicompanion.feature.voice.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -54,7 +62,8 @@ object Routes {
     const val MEMORY = "memory"
     const val SETTINGS = "settings"
     const val VOICE_SETTINGS = "voice_settings"
-    const val VOICE_PROFILES = "voice_profiles"
+    const val IMAGE_GEN_SETTINGS = "image_gen_settings"
+    const val IMAGE_GALLERY = "image_gallery"
     const val LIVE2D_MODELS = "live2d_models"
     const val CONVERSATIONS = "conversations"
     const val DATA_EXPORT = "data_export"
@@ -66,11 +75,17 @@ object Routes {
     const val STICKER_MANAGE = "sticker_manage/{personaId}"
     const val WORLD_BOOK = "world_book/{personaId}/{personaName}"
     const val PROACTIVE_MESSAGES = "proactive_messages"
+    const val MOMENTS = "moments/{personaId}"
+    const val EXPERIENCES = "experiences/{personaId}"
+    const val RENSHE_SHICHANG = "rensheshichang"
+    const val GUIDED_BUILDER = "guided_builder"
 
     fun chatRoute(personaId: String, convId: String? = null) =
         if (convId != null) "chat/$personaId?convId=$convId" else "chat/$personaId"
     fun personaSettingsRoute(personaId: String) = "persona_settings/$personaId"
     fun worldBookRoute(personaId: String, personaName: String) = "world_book/$personaId/$personaName"
+    fun momentsRoute(personaId: String) = "moments/$personaId"
+    fun experiencesRoute(personaId: String) = "experiences/$personaId"
 }
 
 // Bottom nav tabs
@@ -110,8 +125,11 @@ fun AppNavigation(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // User avatar (stored in memory for now; persists across navigation)
-    var userAvatarUri by remember { mutableStateOf<String?>(null) }
+    // User avatar (persisted to SharedPreferences)
+    var userAvatarUri by remember {
+        val saved = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE).getString("avatar_uri", null)
+        mutableStateOf(saved)
+    }
 
     // Only show bottom nav on HOME, PERSONAS, SETTINGS (not on CHAT or sub-screens)
     val showBottomNav = currentRoute in listOf(Routes.HOME, Routes.PERSONAS, Routes.SETTINGS)
@@ -130,12 +148,12 @@ fun AppNavigation(
         bottomBar = {
             if (showBottomNav) {
                 Surface(
-                    shadowElevation = 8.dp,
-                    color = Color.White
+                    shadowElevation = 4.dp,
+                    color = Color(0xF5FFFFFF)
                 ) {
                 NavigationBar(
-                    containerColor = Color.White,
-                    tonalElevation = 3.dp
+                    containerColor = Color(0xF5FFFFFF),
+                    tonalElevation = 0.dp
                 ) {
                     BottomTab.entries.forEach { tab ->
                         val selected = when (tab) {
@@ -180,7 +198,7 @@ fun AppNavigation(
             startDestination = Routes.HOME,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // === HOME: Conversation list ===
+            // === HOME: Conversation list + Moments + Experiences ===
             composable(Routes.HOME) {
                 val chatVm: ChatViewModel = hiltViewModel()
                 val chatState by chatVm.state.collectAsState()
@@ -223,7 +241,6 @@ fun AppNavigation(
                             TextButton(
                                 onClick = {
                                     if (selectedIds.size >= 2) {
-                                        // Check for existing group chat with same participants
                                         val sorted = selectedIds.sorted()
                                         val existing = chatState.conversations.firstOrNull {
                                             it.isGroupChat && it.groupPersonaIds.sorted() == sorted && !it.isArchived
@@ -246,9 +263,16 @@ fun AppNavigation(
                     )
                 }
 
-                ConversationListScreen(
+                val charIllustPath = remember {
+                    val f = File(context.filesDir, "char_illust.png")
+                    if (f.exists()) f.absolutePath
+                    else "file:///android_asset/char_illust.png"
+                }
+
+                HomeScreen(
                     personas = personaState.personas,
                     conversations = buildMap {
+                        // Include personas with existing conversations
                         chatState.conversations.filter { !it.isGroupChat }.forEach { conv ->
                             val p = personaState.personas.firstOrNull { it.id == conv.personaId }
                             if (p != null) put(conv.personaId, PersonaConversation(
@@ -257,17 +281,26 @@ fun AppNavigation(
                                 lastMessageTime = conv.lastMessageAt
                             ))
                         }
+                        // Also include personas without conversations (show them with firstMessage)
+                        personaState.personas.filter { it.id !in this }.forEach { p ->
+                            put(p.id, PersonaConversation(
+                                persona = p,
+                                lastMessage = p.firstMessage.ifBlank { "开始一段新的故事吧～" },
+                                lastMessageTime = p.createdAt
+                            ))
+                        }
                     },
                     groupConversations = chatState.conversations.filter { it.isGroupChat },
+                    characterIllustrationPath = charIllustPath,
+                    context = context,
+                    onPersonaClick = { personaId ->
+                        chatVm.processIntent(ChatIntent.SelectPersona(personaId))
+                        navController.navigate(Routes.chatRoute(personaId))
+                    },
                     onGroupChatClick = { convId ->
                         val conv = chatState.conversations.find { it.id == convId }
                         chatVm.processIntent(ChatIntent.SelectConversation(convId))
                         navController.navigate(Routes.chatRoute(conv?.personaId ?: "", convId))
-                    },
-                    activePersonaId = chatState.activePersona?.id,
-                    onPersonaClick = { personaId ->
-                        chatVm.processIntent(ChatIntent.SelectPersona(personaId))
-                        navController.navigate(Routes.chatRoute(personaId))
                     },
                     onNewConversation = {
                         chatVm.processIntent(ChatIntent.NewConversation)
@@ -353,7 +386,20 @@ fun AppNavigation(
                         navController.navigate(Routes.personaSettingsRoute(personaId))
                     },
                     userAvatarUri = userAvatarUri,
-                    personaMap = personaMapForChat
+                    personaMap = personaMapForChat,
+                    onSpeakMessage = { text ->
+                        val vp = com.aicompanion.core.common.VoicePrefs(context)
+                        if (vp.isCloudEnabled() && vp.getApiKey().isNotBlank()) {
+                            ttsManager.speakCloud(text, vp.getApiKey(), vp.getVoice())
+                        } else {
+                            val prefs = vp.load()
+                            val models = listOf(
+                                "sherpa_models/tts/aishell3" to "vits-aishell3.int8.onnx"
+                            )
+                            val (dir, file) = models[prefs.selectedModelIndex.coerceIn(0, models.size - 1)]
+                            ttsManager.speakLazyLoad(text, 0, dir, file)
+                        }
+                    }
                 )
             }
 
@@ -382,6 +428,8 @@ fun AppNavigation(
                         onUpdatePersona = { updated ->
                             personaVm.updateEditingPersona(updated)
                             personaVm.savePersona()
+                            MomentGeneratorWorker.schedule(context, updated)
+                            ExperienceGeneratorWorker.schedule(context, updated)
                         },
                         onDeleteConversation = { convId -> chatVm.deleteConversation(convId) },
                         onOpenConversation = { convId ->
@@ -406,6 +454,64 @@ fun AppNavigation(
                         },
                         onManageWorldBook = {
                             navController.navigate(Routes.worldBookRoute(persona.id, persona.name))
+                        },
+                        onManageMoments = {
+                            navController.navigate(Routes.momentsRoute(persona.id))
+                        },
+                        onManageExperiences = {
+                            navController.navigate(Routes.experiencesRoute(persona.id))
+                        }
+                    )
+                }
+            }
+
+            // === Moments (朋友圈) ===
+            composable(
+                route = Routes.MOMENTS,
+                arguments = listOf(navArgument("personaId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                val personaVm: PersonaViewModel = hiltViewModel()
+                val personaState by personaVm.state.collectAsState()
+                val persona = personaState.personas.find { it.id == personaId }
+
+                if (persona != null) {
+                    MomentsScreen(
+                        persona = persona,
+                        onBack = { navController.popBackStack() },
+                        onUpdatePersona = { updated ->
+                            personaVm.updateEditingPersona(updated)
+                            personaVm.savePersona()
+                            MomentGeneratorWorker.schedule(context, updated)
+                        },
+                        onGenerateNow = {
+                            MomentGeneratorWorker.generateNow(context, persona.id)
+                        }
+                    )
+                }
+            }
+
+            // === Experiences (最近经历) ===
+            composable(
+                route = Routes.EXPERIENCES,
+                arguments = listOf(navArgument("personaId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val personaId = backStackEntry.arguments?.getString("personaId") ?: ""
+                val personaVm: PersonaViewModel = hiltViewModel()
+                val personaState by personaVm.state.collectAsState()
+                val persona = personaState.personas.find { it.id == personaId }
+
+                if (persona != null) {
+                    ExperiencesScreen(
+                        persona = persona,
+                        onBack = { navController.popBackStack() },
+                        onUpdatePersona = { updated ->
+                            personaVm.updateEditingPersona(updated)
+                            personaVm.savePersona()
+                            ExperienceGeneratorWorker.schedule(context, updated)
+                        },
+                        onGenerateNow = {
+                            ExperienceGeneratorWorker.generateNow(context, persona.id)
                         }
                     )
                 }
@@ -423,7 +529,37 @@ fun AppNavigation(
                     },
                     onSelectPersona = { personaId ->
                         navController.navigate(Routes.chatRoute(personaId))
+                    },
+                    onNavigateToMarket = {
+                        navController.navigate(Routes.RENSHE_SHICHANG)
+                    },
+                    onNavigateToGuidedBuilder = {
+                        navController.navigate(Routes.GUIDED_BUILDER)
                     }
+                )
+            }
+
+            // === Renshe Shichang (Card Market) ===
+            composable(Routes.RENSHE_SHICHANG) {
+                val vm: PersonaViewModel = hiltViewModel()
+                RensheShichangScreen(
+                    viewModel = vm,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // === Guided Builder ===
+            composable(Routes.GUIDED_BUILDER) {
+                val vm: PersonaViewModel = hiltViewModel()
+                PersonaGuidedBuilder(
+                    apiProviderRepository = apiProviderRepository,
+                    onSave = { persona ->
+                        vm.createPersona(persona)
+                        navController.navigate(Routes.PERSONAS) {
+                            popUpTo(Routes.HOME) { inclusive = true }
+                        }
+                    },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -431,7 +567,10 @@ fun AppNavigation(
             composable(Routes.SETTINGS) {
                 SettingsScreen(
                     userAvatarUri = userAvatarUri,
-                    onUserAvatarChanged = { userAvatarUri = it },
+                    onUserAvatarChanged = {
+                        userAvatarUri = it
+                        context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE).edit().putString("avatar_uri", it).apply()
+                    },
                     onBack = {
                         navController.navigate(Routes.HOME) {
                             popUpTo(Routes.HOME) { inclusive = true }
@@ -442,7 +581,8 @@ fun AppNavigation(
                     onNavigateToMemory = { navController.navigate(Routes.MEMORY) },
                     onNavigateToProactiveMessages = { navController.navigate(Routes.PROACTIVE_MESSAGES) },
                     onNavigateToVoiceSettings = { navController.navigate(Routes.VOICE_SETTINGS) },
-                    onNavigateToVoiceProfiles = { navController.navigate(Routes.VOICE_PROFILES) },
+                    onNavigateToImageGen = { navController.navigate(Routes.IMAGE_GEN_SETTINGS) },
+                    onNavigateToImageGallery = { navController.navigate(Routes.IMAGE_GALLERY) },
                     onNavigateToLive2DModels = { navController.navigate(Routes.LIVE2D_MODELS) },
                     onNavigateToConversations = { navController.navigate(Routes.CONVERSATIONS) },
                     onNavigateToDataExport = { navController.navigate(Routes.DATA_EXPORT) },
@@ -465,8 +605,11 @@ fun AppNavigation(
             composable(Routes.VOICE_SETTINGS) {
                 VoiceSettingsScreen(ttsManager = ttsManager, onBack = { navController.popBackStack() })
             }
-            composable(Routes.VOICE_PROFILES) {
-                VoiceProfileScreen(voiceRepository = voiceRepository, ttsManager = ttsManager, onBack = { navController.popBackStack() })
+            composable(Routes.IMAGE_GEN_SETTINGS) {
+                ImageGenSettingsScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.IMAGE_GALLERY) {
+                ImageGalleryScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.LIVE2D_MODELS) {
                 Live2DModelManagerScreen(manager = live2DManager, onBack = { navController.popBackStack() })

@@ -48,18 +48,45 @@ data class Persona(
     // Per-persona overrides
     val voiceProfileId: String? = null,
     val apiProviderId: String? = null,
+    val modelName: String? = null,  // override provider default model
     val avatarImageUri: String? = null,
     val defaultModelPath: String? = null,
     val authorsNote: String = "",
     val waifuMode: Boolean = false,
+    val chuanYueMode: Boolean = false,
     val isPreset: Boolean = false,
-    val createdAt: Long
+    val createdAt: Long,
+    val voiceSid: Int = 0,
+    val appearanceDesc: String = "",
+    val imageGenEnabled: Boolean = false,
+    // Moments & Experiences
+    val moments: List<MomentEntry> = emptyList(),
+    val experiences: List<ExperienceEntry> = emptyList(),
+    val momentsEnabled: Boolean = false,
+    val momentsIntervalMinutes: Int = 60,
+    val momentsRandomMode: Boolean = true,
+    val momentsRandomMinMinutes: Int = 30,
+    val momentsRandomMaxMinutes: Int = 120,
+    val experiencesEnabled: Boolean = false,
+    val experiencesIntervalMinutes: Int = 720,
+    val experiencesRandomMode: Boolean = true,
+    val experiencesRandomMinMinutes: Int = 360,
+    val experiencesRandomMaxMinutes: Int = 1440,
+    val userProfile: UserProfile? = null
 )
 
 data class Trait(
     val key: String,
     val value: String,
     val weight: Float = 0.5f
+)
+
+data class UserProfile(
+    val name: String? = null,
+    val traits: List<String> = emptyList(),
+    val preferences: List<String> = emptyList(),
+    val facts: List<String> = emptyList(),
+    val updatedAt: Long = 0L
 )
 
 data class ApiProvider(
@@ -98,7 +125,9 @@ data class VoiceProfile(
     val pitch: Float = 1.0f,
     val speed: Float = 1.0f,
     val isActive: Boolean = false,
-    val createdAt: Long
+    val createdAt: Long,
+    val ttsModel: String = "",
+    val ttsSid: Int = 0
 )
 
 data class Live2DModelInfo(
@@ -141,5 +170,25 @@ data class ChatContext(
     val provider: ApiProvider,
     val worldBookEntries: List<WorldBookEntry> = emptyList(),
     val groupPersonas: List<Persona> = emptyList(),
-    val isGroupSpeakerTurn: Boolean = false
+    val isGroupSpeakerTurn: Boolean = false,
+    val replyTargetContent: String? = null,
+    val replyTargetSenderName: String? = null,
+    val conversationMood: String = "neutral"  // neutral, happy, sad, excited, flat
+)
+
+data class MomentEntry(
+    val id: String,
+    val content: String,
+    val location: String? = null,
+    val mood: String? = null,
+    val createdAt: Long,
+    val imageUri: String? = null
+)
+
+data class ExperienceEntry(
+    val id: String,
+    val title: String,
+    val content: String,
+    val category: String = "日常",
+    val createdAt: Long
 )
